@@ -23,6 +23,28 @@ deploy_site() {
         return 1
     fi
     
+    # Étape 3: Demander l'adresse IP publique du serveur
+    local detected_ip=$(get_server_ip)
+    local server_ip=$(get_user_input "Entrez l'adresse IP publique du serveur" "$detected_ip" true)
+    
+    if ! [[ $server_ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        show_error "Format d'adresse IP invalide: $server_ip"
+        if ! confirm_action "Voulez-vous continuer quand même?"; then
+            return 1
+        fi
+    fi
+    
+    # Étape 4: Vérifier si l'utilisateur veut spécifier un dossier source
+    local source_dir=""
+    if confirm_action "Voulez-vous déployer un site existant depuis un dossier local?"; then
+        source_dir=$(get_user_input "Entrez le chemin complet du dossier source contenant le site" "" true)
+        
+        if [ ! -d "$source_dir" ]; then
+            show_error "Le dossier source n'existe pas: $source_dir"
+            return 1
+        fi
+    fi
+    
     # Vérifier si le site existe déjà
     if [ -d "$WWW_DIR/$site_name" ]; then
         show_warning "Le répertoire du site existe déjà: $WWW_DIR/$site_name"
@@ -40,7 +62,7 @@ deploy_site() {
         fi
     fi
     
-    # Étape 3: Créer le répertoire du site
+    # Étape 5: Créer le répertoire du site
     log_info "Création du répertoire pour le site: $WWW_DIR/$site_name"
     
     if [ -d "$WWW_DIR/$site_name" ]; then
@@ -50,14 +72,20 @@ deploy_site() {
     
     mkdir -p "$WWW_DIR/$site_name"
     
-    # Étape 4: Créer la page d'accueil par défaut
-    if [ "$CREATE_DEFAULT_INDEX" = true ]; then
+    # Étape 6: Si un dossier source est spécifié, copier son contenu
+    if [ -n "$source_dir" ]; then
+        log_info "Copie des fichiers depuis $source_dir vers $WWW_DIR/$site_name..."
+        cp -r "$source_dir"/* "$WWW_DIR/$site_name"/ 2>/dev/null
+        if [ $? -ne 0 ]; then
+            show_warning "Certains fichiers n'ont pas pu être copiés. Vérifiez les permissions."
+        fi
+    # Sinon, créer la page d'accueil par défaut
+    elif [ "$CREATE_DEFAULT_INDEX" = true ]; then
         log_info "Création de la page d'accueil par défaut..."
-        
         generate_default_index "$WWW_DIR/$site_name" "$domain" "nouveau"
     fi
     
-    # Étape 5: Créer la configuration Apache
+    # Étape 7: Créer la configuration Apache
     log_info "Création de la configuration Apache pour $domain..."
     
     cat > "$APACHE_AVAILABLE/$domain.conf" <<EOL
@@ -97,54 +125,39 @@ deploy_site() {
 </VirtualHost>
 EOL
     
-    # Étape 6: Activer le site
+    # Étape 8: Activer le site
     log_info "Activation du site $domain..."
     a2ensite "$domain.conf" >/dev/null 2>&1
     
-    # Étape 7: Redémarrer Apache
+    # Étape 9: Redémarrer Apache
     log_info "Redémarrage d'Apache..."
     if ! restart_apache; then
         show_error "Échec du redémarrage d'Apache"
         return 1
     fi
     
-    # Étape 8: Définir les permissions
+    # Étape 10: Définir les permissions
     log_info "Configuration des permissions..."
     chown -R $DEFAULT_OWNER "$WWW_DIR/$site_name"
     chmod -R $DEFAULT_PERMISSIONS "$WWW_DIR/$site_name"
     find "$WWW_DIR/$site_name" -type f -exec chmod $DEFAULT_FILE_PERMISSIONS {} \;
     
-    # Étape 9: Afficher les informations DNS
+    # Étape 11: Afficher les informations DNS
     show_success "Site $domain déployé avec succès"
     
-    # Récupérer l'adresse IP du serveur
-    local server_ip=""
-    
-    # Essayer différentes méthodes pour obtenir l'IP externe
-    if command_exists curl; then
-        server_ip=$(curl -s ifconfig.me 2>/dev/null)
-    elif command_exists wget; then
-        server_ip=$(wget -qO- ifconfig.me 2>/dev/null)
-    fi
-    
-    # Si l'IP externe n'est pas disponible, essayer l'IP interne principale
-    if [ -z "$server_ip" ]; then
-        server_ip=$(hostname -I | awk '{print $1}')
-    fi
-    
-    # Afficher les informations DNS à configurer
+    # Afficher les informations DNS avec l'IP spécifiée par l'utilisateur
     show_info "Pour que votre site soit accessible, configurez les DNS suivants:"
     echo -e "Type A: ${BOLD_YELLOW}$domain${NC}\t→\t${BOLD_CYAN}$server_ip${NC}"
     echo -e "Type A: ${BOLD_YELLOW}www.$domain${NC}\t→\t${BOLD_CYAN}$server_ip${NC}"
     
-    # Étape 10: Proposer de configurer HTTPS
+    # Étape 12: Proposer de configurer HTTPS
     if confirm_action "Voulez-vous configurer HTTPS pour ce site maintenant?"; then
         configure_https "$domain"
     else
         show_info "Vous pourrez configurer HTTPS plus tard via le menu SSL/HTTPS"
     fi
     
-    # Étape 11: Indiquer comment accéder au site
+    # Étape 13: Indiquer comment accéder au site
     show_info "Votre site est accessible aux adresses suivantes:"
     echo -e "http://$domain:$DEFAULT_HTTP_PORT"
     echo -e "http://www.$domain:$DEFAULT_HTTP_PORT"
@@ -921,7 +934,8 @@ EOL
     show_success "Site $domain importé et déployé avec succès!"
     
     # 14. Afficher les informations DNS
-    local server_ip=$(get_server_ip)
+    local detected_ip=$(get_server_ip)
+    local server_ip=$(get_user_input "Entrez l'adresse IP publique du serveur" "$detected_ip" true)
     
     show_info "Pour que votre site soit accessible, configurez les DNS suivants:"
     echo -e "Type A: ${BOLD_YELLOW}$domain${NC}\t→\t${BOLD_CYAN}$server_ip${NC}"

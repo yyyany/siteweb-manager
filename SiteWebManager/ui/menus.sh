@@ -264,7 +264,10 @@ sites_menu() {
                 check_repair_site
                 pause
                 ;;
-            7) ssl_dns_menu ;;
+            7) 
+                log_info "Diagnostic DNS..."
+                ssl_dns_menu 
+                ;;
             0) return ;;
             *) 
                 show_error "Option invalide"
@@ -288,6 +291,18 @@ ssl_dns_menu() {
     if [ -z "$domain" ]; then
         show_error "Nom de domaine non spécifié"
         return 1
+    fi
+    
+    # Vérifier si l'outil host est installé
+    if ! command_exists host; then
+        show_warning "L'outil DNS 'host' n'est pas installé"
+        if confirm_action "Voulez-vous installer dnsutils maintenant?"; then
+            apt update && apt install -y dnsutils
+            show_success "dnsutils installé avec succès"
+        else
+            show_error "dnsutils est nécessaire pour vérifier les DNS"
+            return 1
+        fi
     fi
     
     check_dns "$domain"
