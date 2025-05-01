@@ -1,5 +1,50 @@
 #!/bin/bash
 
+# Vérifier si les chemins exportés sont disponibles
+if [ -z "$BASE_DIR" ]; then
+    # Si non, déterminer le chemin absolu
+    SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    if [[ "$SCRIPT_DIR" == */ui ]]; then
+        BASE_DIR="$(dirname "$SCRIPT_DIR")"
+    elif [[ "$SCRIPT_DIR" == */siteweb-manager/SiteWebManager/ui ]]; then
+        BASE_DIR="$(dirname "$SCRIPT_DIR")"
+    elif [ -d "/home/ubuntu/siteweb-manager/SiteWebManager" ]; then
+        BASE_DIR="/home/ubuntu/siteweb-manager/SiteWebManager"
+    else
+        echo "ERREUR: Impossible de déterminer le chemin de base depuis menus.sh. Chemin actuel: $SCRIPT_DIR"
+        exit 1
+    fi
+    
+    # Définir et exporter les chemins vers les modules
+    CONFIG_FILE="$BASE_DIR/config/config.sh"
+    UTILS_FILE="$BASE_DIR/lib/utils.sh"
+    SYSTEM_FILE="$BASE_DIR/lib/system.sh"
+    APACHE_FILE="$BASE_DIR/lib/apache.sh"
+    SITES_FILE="$BASE_DIR/lib/sites.sh"
+    SSL_FILE="$BASE_DIR/lib/ssl.sh"
+    MENUS_FILE="$BASE_DIR/ui/menus.sh"
+    
+    # Charger ces modules s'ils ne sont pas déjà chargés
+    for file in "$CONFIG_FILE" "$UTILS_FILE" "$SYSTEM_FILE" "$APACHE_FILE" "$SITES_FILE" "$SSL_FILE"; do
+        if [ -f "$file" ]; then
+            # Vérifier si le fichier a déjà été chargé
+            filename=$(basename "$file")
+            if ! declare -f | grep -q "$(basename "$file" .sh)"; then
+                echo "Chargement de $filename depuis menus.sh..."
+                source "$file"
+            fi
+        else
+            echo "ERREUR: Fichier non trouvé: $file"
+        fi
+    done
+fi
+
+# Enregistrer les fonctions disponibles pour déboguer
+if [ "$DEBUG" = "1" ]; then
+    echo "Fonctions disponibles dans menus.sh:"
+    declare -F | grep -v '^declare -f _' | sed 's/declare -f //'
+fi
+
 # Menu de gestion des sites
 manage_sites() {
     while true; do
