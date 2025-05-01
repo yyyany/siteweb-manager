@@ -128,24 +128,110 @@ EOF
 
 # Fonction pour lister les sites web
 list_sites() {
-    log_info "Liste des sites web..."
+    show_header
+    echo -e "${BLUE}=== Liste des sites web ===${NC}"
+    echo
     
-    echo -e "${BLUE}=== Sites web ===${NC}"
+    # Variables pour compter les sites
+    local available_count=0
+    local enabled_count=0
+    local deployed_count=0
     
-    # Sites disponibles
-    echo -e "\n${YELLOW}Sites disponibles :${NC}"
-    ls -1 "$APACHE_AVAILABLE" | grep -v "000-default.conf" | sed 's/\.conf$//' || echo "Aucun site disponible"
+    # Tableau pour stocker les informations
+    declare -a sites_info
     
-    # Sites activés
-    echo -e "\n${YELLOW}Sites activés :${NC}"
-    ls -1 "$APACHE_ENABLED" | grep -v "000-default.conf" | sed 's/\.conf$//' || echo "Aucun site activé"
+    # Sites déployés (dans WWW_DIR)
+    echo -e "${YELLOW}Sites déployés dans $WWW_DIR :${NC}"
+    echo -e "${CYAN}----------------------------------------------------${NC}"
     
-    # Sites déployés
-    echo -e "\n${YELLOW}Sites déployés :${NC}"
-    ls -1 "$WWW_DIR" | grep -v "html" || echo "Aucun site déployé"
+    if [[ -d "$WWW_DIR" ]]; then
+        while IFS= read -r site; do
+            if [[ "$site" != "html" ]]; then
+                # Obtenir des informations sur le site
+                local files_count=$(find "$WWW_DIR/$site" -type f | wc -l)
+                local dir_size=$(du -sh "$WWW_DIR/$site" 2>/dev/null | cut -f1)
+                
+                echo -e "${GREEN}$site${NC}"
+                echo -e "  ${YELLOW}Chemin:${NC} $WWW_DIR/$site"
+                echo -e "  ${YELLOW}Taille:${NC} $dir_size (${files_count} fichiers)"
+                
+                # Vérifier la configuration
+                local has_config="Non"
+                if [[ -f "$APACHE_AVAILABLE/$site.conf" ]]; then
+                    has_config="Oui"
+                fi
+                
+                # Vérifier l'activation
+                local is_active="Non"
+                if [[ -f "$APACHE_ENABLED/$site.conf" ]]; then
+                    is_active="Oui"
+                fi
+                
+                echo -e "  ${YELLOW}Configuration:${NC} $has_config, ${YELLOW}Activé:${NC} $is_active"
+                echo
+                
+                ((deployed_count++))
+            fi
+        done < <(ls -1 "$WWW_DIR" 2>/dev/null)
+        
+        if [[ $deployed_count -eq 0 ]]; then
+            echo -e "${CYAN}Aucun site déployé.${NC}"
+            echo
+        fi
+    else
+        echo -e "${CYAN}Le répertoire $WWW_DIR n'existe pas.${NC}"
+        echo
+    fi
     
-    # Ajout d'une pause pour que l'utilisateur puisse lire les informations
-    echo -e "\n${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+    # Sites disponibles (configurations dans APACHE_AVAILABLE)
+    echo -e "${YELLOW}Configurations de sites disponibles dans $APACHE_AVAILABLE :${NC}"
+    echo -e "${CYAN}----------------------------------------------------${NC}"
+    
+    if [[ -d "$APACHE_AVAILABLE" ]]; then
+        while IFS= read -r config; do
+            if [[ "$config" != "000-default.conf" && "$config" =~ \.conf$ ]]; then
+                local site_name=${config%.conf}
+                
+                # Vérifier si le site est activé
+                local status="Désactivé"
+                if [[ -f "$APACHE_ENABLED/$config" ]]; then
+                    status="Activé"
+                    ((enabled_count++))
+                fi
+                
+                # Vérifier si le répertoire du site existe
+                local dir_exists="Non"
+                if [[ -d "$WWW_DIR/$site_name" ]]; then
+                    dir_exists="Oui"
+                fi
+                
+                echo -e "${GREEN}$site_name${NC} ($status)"
+                echo -e "  ${YELLOW}Configuration:${NC} $APACHE_AVAILABLE/$config"
+                echo -e "  ${YELLOW}Répertoire existe:${NC} $dir_exists"
+                echo
+                
+                ((available_count++))
+            fi
+        done < <(ls -1 "$APACHE_AVAILABLE" 2>/dev/null)
+        
+        if [[ $available_count -eq 0 ]]; then
+            echo -e "${CYAN}Aucune configuration de site disponible.${NC}"
+            echo
+        fi
+    else
+        echo -e "${CYAN}Le répertoire $APACHE_AVAILABLE n'existe pas.${NC}"
+        echo
+    fi
+    
+    # Résumé
+    echo -e "${BLUE}=== Résumé ===${NC}"
+    echo -e "${YELLOW}Sites déployés:${NC} $deployed_count"
+    echo -e "${YELLOW}Configurations disponibles:${NC} $available_count"
+    echo -e "${YELLOW}Sites activés:${NC} $enabled_count"
+    
+    # Attendre que l'utilisateur appuie sur Entrée
+    echo
+    echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
     read -p ""
 }
 
@@ -588,6 +674,11 @@ scan_potential_sites() {
         search_dir="/home"
     fi
     
+    # S'assurer que le chemin se termine par /
+    if [[ ! "$search_dir" == */ ]]; then
+        search_dir="$search_dir/"
+    fi
+    
     show_info "Recherche de sites potentiels dans $search_dir..."
     echo
     
@@ -600,28 +691,34 @@ scan_potential_sites() {
     declare -a potential_sites
     local count=0
     
-    # Recherche des dossiers contenant index.html
+    # Recherche des dossiers contenant index.html avec find
     echo -e "${YELLOW}Recherche des fichiers index.html...${NC}"
+    
+    # Utiliser find avec -L pour suivre les liens symboliques et 2>/dev/null pour ignorer les erreurs de permission
     while IFS= read -r file; do
         local dir=$(dirname "$file")
-        potential_sites+=("$dir")
-        ((count++))
-    done < <(find "$search_dir" -name "index.html" -type f 2>/dev/null)
+        # Vérifier que le dossier n'est pas déjà dans la liste
+        if [[ ! " ${potential_sites[*]} " =~ " ${dir} " ]]; then
+            potential_sites+=("$dir")
+            ((count++))
+        fi
+    done < <(find -L "$search_dir" -type f -name "index.html" 2>/dev/null)
     
     # Recherche des dossiers contenant index.php
     echo -e "${YELLOW}Recherche des fichiers index.php...${NC}"
     while IFS= read -r file; do
         local dir=$(dirname "$file")
-        # Vérifier si ce dossier n'est pas déjà dans la liste (avec index.html)
-        if ! echo "${potential_sites[@]}" | grep -q "$dir"; then
+        # Vérifier que le dossier n'est pas déjà dans la liste
+        if [[ ! " ${potential_sites[*]} " =~ " ${dir} " ]]; then
             potential_sites+=("$dir")
             ((count++))
         fi
-    done < <(find "$search_dir" -name "index.php" -type f 2>/dev/null)
+    done < <(find -L "$search_dir" -type f -name "index.php" 2>/dev/null)
     
     # Afficher les résultats
     if [[ $count -eq 0 ]]; then
         echo -e "${YELLOW}Aucun site potentiel trouvé.${NC}"
+        echo -e "${CYAN}Vérifieez le chemin spécifié ou essayez avec un autre répertoire.${NC}"
         echo
         echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
         read -p ""
@@ -676,17 +773,46 @@ scan_potential_sites() {
 
 # Fonction pour obtenir la liste des sites déployés avec sélection
 list_deployed_sites_with_selection() {
+    show_header
     echo -e "${BLUE}=== Sites déployés ===${NC}"
+    echo
     
     # Tableau pour stocker les sites déployés
     declare -a deployed_sites
     local count=0
     
-    # Lister les sites déployés
+    # Vérifier si le répertoire WWW_DIR existe
+    if [[ ! -d "$WWW_DIR" ]]; then
+        show_error "Le répertoire $WWW_DIR n'existe pas"
+        echo
+        echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+        read -p ""
+        return 1
+    fi
+    
+    # Lister les sites déployés (exclure le dossier html)
     while IFS= read -r site; do
         if [[ "$site" != "html" ]]; then
             deployed_sites+=("$site")
+            
+            # Obtenir quelques infos sur le site
+            local files_count=$(find "$WWW_DIR/$site" -type f | wc -l)
+            local dir_size=$(du -sh "$WWW_DIR/$site" 2>/dev/null | cut -f1)
+            local has_config="Non"
+            if [[ -f "$APACHE_AVAILABLE/$site.conf" ]]; then
+                has_config="Oui"
+            fi
+            local is_active="Non"
+            if [[ -f "$APACHE_ENABLED/$site.conf" ]]; then
+                is_active="Oui"
+            fi
+            
             echo -e "${GREEN}$((count+1)).${NC} $site"
+            echo -e "   ${YELLOW}Chemin:${NC} $WWW_DIR/$site"
+            echo -e "   ${YELLOW}Taille:${NC} $dir_size (${files_count} fichiers)"
+            echo -e "   ${YELLOW}Configuration:${NC} $has_config, ${YELLOW}Activé:${NC} $is_active"
+            echo
+            
             ((count++))
         fi
     done < <(ls -1 "$WWW_DIR" 2>/dev/null)
@@ -699,7 +825,6 @@ list_deployed_sites_with_selection() {
         return 1
     fi
     
-    echo
     echo -e "${YELLOW}Sélectionnez un site par son numéro (1-$count) ou 0 pour annuler :${NC}"
     local choice
     read -p "Votre choix : " choice
@@ -714,10 +839,16 @@ list_deployed_sites_with_selection() {
             return 2
         else
             show_error "Choix invalide."
+            echo
+            echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+            read -p ""
             return 1
         fi
     else
         show_error "Veuillez entrer un nombre."
+        echo
+        echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+        read -p ""
         return 1
     fi
 } 

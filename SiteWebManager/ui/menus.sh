@@ -58,11 +58,21 @@ show_sites_menu() {
                 echo -e "${CYAN}Comment souhaitez-vous sélectionner le site à déployer ?${NC}"
                 echo -e "${GREEN}1.${NC} Rechercher des sites potentiels (recommandé)"
                 echo -e "${GREEN}2.${NC} Saisir le chemin manuellement"
+                echo -e "${GREEN}0.${NC} Annuler et revenir au menu"
                 echo
                 
                 local select_method
-                read -p "Votre choix (1-2) : " select_method
+                read -p "Votre choix (0-2) : " select_method
                 
+                # Si l'utilisateur veut annuler
+                if [[ "$select_method" == "0" ]]; then
+                    continue
+                fi
+                
+                # Variable pour stocker le chemin source
+                local source_dir=""
+                
+                # Traitement du choix
                 case $select_method in
                     1)
                         show_header
@@ -91,11 +101,19 @@ show_sites_menu() {
                             read -p "Appuyez sur Entrée pour continuer..."
                             continue
                         elif [[ -z "$source_dir" ]]; then
-                            continue
+                            continue  # La fonction a déjà montré une erreur
                         fi
                         ;;
                     2)
-                        read -p "Chemin du répertoire source (ex: /home/utilisateur/mon-site) : " source_dir
+                        show_header
+                        echo -e "${BLUE}=== Saisie manuelle du chemin ===${NC}"
+                        echo
+                        echo -e "${CYAN}Veuillez saisir le chemin complet du répertoire contenant votre site web.${NC}"
+                        echo -e "${CYAN}Exemple: /home/utilisateur/mon-site${NC}"
+                        echo
+                        
+                        read -p "Chemin du répertoire source : " source_dir
+                        
                         if [[ -z "$source_dir" ]]; then
                             show_error "Le chemin du répertoire source ne peut pas être vide"
                             read -p "Appuyez sur Entrée pour continuer..."
@@ -108,6 +126,17 @@ show_sites_menu() {
                             read -p "Appuyez sur Entrée pour continuer..."
                             continue
                         fi
+                        
+                        # Vérifier si le répertoire contient des fichiers index.html ou index.php
+                        if [[ ! -f "$source_dir/index.html" && ! -f "$source_dir/index.php" ]]; then
+                            show_warning "Aucun fichier index.html ou index.php trouvé dans ce répertoire."
+                            echo -e "${YELLOW}Ce répertoire ne semble pas contenir un site web.${NC}"
+                            
+                            if ! show_confirm "Voulez-vous continuer quand même?" "n"; then
+                                read -p "Appuyez sur Entrée pour revenir au menu..."
+                                continue
+                            fi
+                        fi
                         ;;
                     *)
                         show_error "Choix invalide"
@@ -116,17 +145,34 @@ show_sites_menu() {
                         ;;
                 esac
                 
-                echo -e "${BLUE}=== Nom de domaine ===${NC}"
-                read -p "Nom de domaine (ex: exemple.com) : " domain
+                # Si on arrive ici, on a un source_dir valide, demander le nom de domaine
+                show_header
+                echo -e "${BLUE}=== Configuration du domaine ===${NC}"
+                echo
+                echo -e "${CYAN}Veuillez saisir le nom de domaine pour le site ${YELLOW}$source_dir${NC}"
+                echo -e "${CYAN}Exemple: exemple.com${NC}"
+                echo
+                
+                read -p "Nom de domaine : " domain
+                
                 if [[ -z "$domain" ]]; then
                     show_error "Le nom de domaine ne peut pas être vide"
                     read -p "Appuyez sur Entrée pour continuer..."
                     continue
                 fi
                 
+                # Vérifier si le domaine est valide
+                if ! validate_domain "$domain"; then
+                    show_error "Le nom de domaine '$domain' n'est pas valide"
+                    echo -e "${YELLOW}Format attendu: exemple.com${NC}"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+                
                 # Confirmation avec récapitulatif
+                show_header
+                echo -e "${BLUE}=== Récapitulatif du déploiement ===${NC}"
                 echo
-                echo -e "${BLUE}=== Récapitulatif ===${NC}"
                 echo -e "${YELLOW}Répertoire source :${NC} $source_dir"
                 echo -e "${YELLOW}Nom de domaine :${NC} $domain"
                 echo -e "${YELLOW}Destination :${NC} $WWW_DIR/$domain"
