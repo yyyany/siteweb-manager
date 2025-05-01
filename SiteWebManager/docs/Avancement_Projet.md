@@ -1,6 +1,6 @@
 # Avancement du Projet SiteWebManager
 
-## État d'avancement au 18/10/2023
+## État d'avancement au 19/10/2023
 
 ### Architecture et Structure
 - ✅ Structure de répertoires mise en place
@@ -44,14 +44,17 @@
   - ✅ Suppression de sites
   - ✅ Diagnostics et réparation de sites
   - ✅ Vérification des DNS
+  - ✅ Importation automatique de sites (répertoire local, archive, dépôt Git)
+
+- ✅ **SSL/HTTPS (lib/ssl.sh)**
+  - ✅ Installation de Certbot (Let's Encrypt)
+  - ✅ Ajout de certificats SSL aux sites
+  - ✅ Renouvellement et vérification des certificats
+  - ✅ Configuration de la redirection HTTP vers HTTPS
+  - ✅ Tests de configuration SSL
+  - ✅ Configuration automatique du renouvellement
 
 ### Modules à implémenter
-- ❌ **SSL/HTTPS (lib/ssl.sh)**
-  - ❌ Configuration SSL/TLS
-  - ❌ Gestion des certificats Let's Encrypt
-  - ❌ Renouvellement et surveillance
-  - ❌ Diagnostics SSL
-
 - ❌ **PHP (lib/php.sh)**
   - ❌ Installation et configuration de PHP
   - ❌ Gestion des versions multiples
@@ -74,7 +77,7 @@
 ## Prochaines étapes
 1. ✅ Implémenter le module Apache (lib/apache.sh)
 2. ✅ Implémenter le module de gestion des sites (lib/sites.sh)
-3. Implémenter le module SSL/HTTPS (lib/ssl.sh)
+3. ✅ Implémenter le module SSL/HTTPS (lib/ssl.sh)
 4. Implémenter le module PHP (lib/php.sh)
 5. Implémenter le module de base de données (lib/db.sh)
 6. Finaliser la documentation
@@ -90,5 +93,6 @@
 - Les modules sont indépendants mais peuvent interagir entre eux
 
 ## Dernières modifications
-- **18/10/2023** : Implémentation complète du module Apache (lib/apache.sh)
-- **18/10/2023** : Implémentation complète du module de gestion des sites (lib/sites.sh) 
+- **19/10/2023** : Implémentation complète du module SSL/HTTPS (lib/ssl.sh)
+- **18/10/2023** : Implémentation complète du module de gestion des sites (lib/sites.sh)
+- **18/10/2023** : Implémentation complète du module Apache (lib/apache.sh) 

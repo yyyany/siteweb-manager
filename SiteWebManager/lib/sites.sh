@@ -799,4 +799,324 @@ check_dns() {
     fi
     
     return 0
+}
+
+# Fonction pour importer un site web depuis différentes sources
+import_site() {
+    log_info "Importation d'un site web..."
+    
+    # Vérifier si Apache est installé
+    if ! command_exists apache2; then
+        show_error "Apache n'est pas installé. Installation requise avant d'importer un site."
+        
+        if confirm_action "Voulez-vous installer Apache maintenant?"; then
+            install_apache
+        else
+            return 1
+        fi
+    fi
+    
+    show_header "Importation d'un site web"
+    
+    # 1. Demander le nom du site
+    local site_name=$(get_user_input "Entrez le nom du site (sera utilisé comme nom de dossier)" "" true)
+    
+    # 2. Demander le nom de domaine
+    local domain_name=$(get_user_input "Entrez le nom de domaine (ex: example.com)" "" true)
+    
+    # Valider le nom de domaine
+    if ! validate_domain "$domain_name"; then
+        show_error "Nom de domaine invalide: $domain_name"
+        return 1
+    fi
+    
+    # 3. Vérifier si le domaine existe déjà
+    if [ -f "$APACHE_AVAILABLE/$domain_name.conf" ]; then
+        show_error "Une configuration pour $domain_name existe déjà"
+        
+        if ! confirm_action "Voulez-vous écraser la configuration existante?"; then
+            return 1
+        fi
+        
+        # Désactiver le site existant
+        log_info "Désactivation du site existant..."
+        a2dissite "$domain_name.conf" >/dev/null 2>&1
+    fi
+    
+    # 4. Sélectionner la méthode d'importation
+    show_menu "Sélectionnez la source d'importation" \
+        "Importer depuis un répertoire local" \
+        "Importer depuis une archive (zip/tar.gz)" \
+        "Importer depuis un dépôt Git" \
+        "back"
+    
+    local choice=$(get_user_choice "Entrez votre choix" 3)
+    
+    # 5. Préparer le répertoire de destination
+    local target_dir="$WWW_DIR/$site_name"
+    
+    # Vérifier si le répertoire existe déjà
+    if [ -d "$target_dir" ]; then
+        show_warning "Le répertoire $target_dir existe déjà"
+        
+        if confirm_action "Voulez-vous supprimer le contenu existant?"; then
+            log_info "Suppression du contenu existant..."
+            rm -rf "$target_dir"
+        else
+            if ! confirm_action "Voulez-vous continuer et écraser les fichiers existants?"; then
+                return 1
+            fi
+        fi
+    fi
+    
+    # Créer le répertoire s'il n'existe pas
+    if [ ! -d "$target_dir" ]; then
+        log_info "Création du répertoire $target_dir..."
+        mkdir -p "$target_dir"
+    fi
+    
+    # 6. Importer selon la méthode choisie
+    case $choice in
+        1) # Importer depuis un répertoire local
+            local source_dir=$(get_user_input "Entrez le chemin du répertoire source" "" true)
+            
+            if [ ! -d "$source_dir" ]; then
+                show_error "Le répertoire source $source_dir n'existe pas"
+                return 1
+            fi
+            
+            log_info "Copie des fichiers depuis $source_dir vers $target_dir..."
+            cp -r "$source_dir"/* "$target_dir"/ 2>/dev/null
+            
+            if [ $? -ne 0 ]; then
+                show_warning "Certains fichiers n'ont pas pu être copiés. Vérifiez les permissions."
+            fi
+            ;;
+            
+        2) # Importer depuis une archive
+            local archive_path=$(get_user_input "Entrez le chemin de l'archive (zip ou tar.gz)" "" true)
+            
+            if [ ! -f "$archive_path" ]; then
+                show_error "L'archive $archive_path n'existe pas"
+                return 1
+            fi
+            
+            log_info "Extraction de l'archive $archive_path vers $target_dir..."
+            
+            # Déterminer le type d'archive
+            if [[ "$archive_path" == *.zip ]]; then
+                # Vérifier si unzip est installé
+                if ! command_exists unzip; then
+                    show_warning "La commande unzip n'est pas installée. Installation..."
+                    apt update -qq && apt install -y unzip
+                fi
+                
+                unzip -q "$archive_path" -d "$target_dir"
+            elif [[ "$archive_path" == *.tar.gz || "$archive_path" == *.tgz ]]; then
+                tar -xzf "$archive_path" -C "$target_dir"
+            else
+                show_error "Format d'archive non supporté. Utilisez zip ou tar.gz"
+                return 1
+            fi
+            
+            # Vérifier si les fichiers sont dans un sous-répertoire
+            local subdirs=$(find "$target_dir" -maxdepth 1 -type d | wc -l)
+            if [ "$subdirs" -eq 2 ]; then
+                # Il n'y a qu'un seul sous-répertoire, les fichiers sont probablement dedans
+                local subdir=$(find "$target_dir" -maxdepth 1 -type d -not -path "$target_dir" | head -1)
+                if [ -n "$subdir" ]; then
+                    log_info "Déplacement des fichiers depuis $subdir vers $target_dir..."
+                    mv "$subdir"/* "$target_dir"/ 2>/dev/null
+                    rmdir "$subdir" 2>/dev/null
+                fi
+            fi
+            ;;
+            
+        3) # Importer depuis un dépôt Git
+            # Vérifier si git est installé
+            if ! command_exists git; then
+                show_warning "Git n'est pas installé. Installation..."
+                apt update -qq && apt install -y git
+            fi
+            
+            local repo_url=$(get_user_input "Entrez l'URL du dépôt Git" "" true)
+            local branch=$(get_user_input "Entrez la branche à cloner (laisser vide pour la branche par défaut)" "")
+            
+            log_info "Clonage du dépôt $repo_url vers $target_dir..."
+            
+            if [ -z "$branch" ]; then
+                git clone --depth=1 "$repo_url" "$target_dir"
+            else
+                git clone --depth=1 -b "$branch" "$repo_url" "$target_dir"
+            fi
+            
+            if [ $? -ne 0 ]; then
+                show_error "Échec du clonage du dépôt Git"
+                return 1
+            fi
+            
+            # Supprimer le dossier .git pour économiser de l'espace
+            rm -rf "$target_dir/.git"
+            ;;
+            
+        0) # Retour
+            return 0
+            ;;
+            
+        *) 
+            show_error "Option invalide"
+            return 1
+            ;;
+    esac
+    
+    # 7. Configurer les permissions
+    log_info "Configuration des permissions..."
+    chown -R $DEFAULT_OWNER "$target_dir"
+    chmod -R $DEFAULT_PERMISSIONS "$target_dir"
+    find "$target_dir" -type f -exec chmod $DEFAULT_FILE_PERMISSIONS {} \;
+    
+    # 8. Vérifier la présence d'un fichier index
+    if [ ! -f "$target_dir/index.html" ] && [ ! -f "$target_dir/index.php" ]; then
+        show_warning "Aucun fichier index trouvé"
+        
+        if confirm_action "Voulez-vous créer un fichier index.html par défaut?"; then
+            cat > "$target_dir/index.html" << EOF
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$domain_name</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f5f5f5;
+            text-align: center;
+        }
+        .container {
+            max-width: 800px;
+            padding: 40px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        p {
+            color: #666;
+            margin-bottom: 15px;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 0.9em;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bienvenue sur $domain_name</h1>
+        <p>Site importé avec SiteWeb Manager.</p>
+        <div class="footer">
+            <p>Site géré avec SiteWeb Manager</p>
+            <p>Date d'importation: $(date '+%d-%m-%Y')</p>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+            chown $DEFAULT_OWNER "$target_dir/index.html"
+            chmod $DEFAULT_FILE_PERMISSIONS "$target_dir/index.html"
+            show_success "Fichier index.html créé"
+        fi
+    fi
+    
+    # 9. Créer la configuration Apache
+    log_info "Création de la configuration Apache..."
+    
+    # Sauvegarde si la configuration existe déjà
+    if [ -f "$APACHE_AVAILABLE/$domain_name.conf" ]; then
+        backup_file "$APACHE_AVAILABLE/$domain_name.conf"
+    fi
+    
+    # Créer la configuration
+    cat > "$APACHE_AVAILABLE/$domain_name.conf" << EOF
+<VirtualHost *:$DEFAULT_HTTP_PORT>
+    ServerName $domain_name
+    ServerAlias www.$domain_name
+    DocumentRoot $target_dir
+    
+    <Directory $target_dir>
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+    
+    ErrorLog \${APACHE_LOG_DIR}/${domain_name}_error.log
+    CustomLog \${APACHE_LOG_DIR}/${domain_name}_access.log combined
+</VirtualHost>
+EOF
+    
+    # 10. Activer le site
+    log_info "Activation du site..."
+    a2ensite "$domain_name.conf" >/dev/null 2>&1
+    
+    # 11. Vérifier la configuration Apache
+    log_info "Vérification de la configuration Apache..."
+    if ! apache2ctl configtest > /dev/null 2>&1; then
+        show_error "La configuration Apache contient des erreurs"
+        
+        if confirm_action "Voulez-vous consulter les erreurs?"; then
+            apache2ctl configtest
+        fi
+        
+        if confirm_action "Voulez-vous restaurer la configuration précédente?"; then
+            if [ -f "$APACHE_AVAILABLE/$domain_name.conf.bak" ]; then
+                cp "$APACHE_AVAILABLE/$domain_name.conf.bak" "$APACHE_AVAILABLE/$domain_name.conf"
+                show_success "Configuration restaurée"
+            else
+                rm "$APACHE_AVAILABLE/$domain_name.conf"
+                show_info "Configuration supprimée"
+            fi
+            
+            a2dissite "$domain_name.conf" >/dev/null 2>&1
+            return 1
+        fi
+    fi
+    
+    # 12. Redémarrer Apache
+    log_info "Redémarrage d'Apache..."
+    if ! systemctl restart apache2; then
+        show_error "Échec du redémarrage d'Apache"
+        return 1
+    fi
+    
+    # 13. Afficher les informations de déploiement
+    show_success "Site $domain_name importé et déployé avec succès!"
+    
+    # 14. Afficher les informations DNS
+    local server_ip=$(get_server_ip)
+    
+    show_header "Configuration DNS requise"
+    show_info "Pour que votre site soit accessible, configurez les DNS suivants:"
+    echo -e "Type A:\t$domain_name\t→\t$server_ip"
+    echo -e "Type A:\twww.$domain_name\t→\t$server_ip"
+    
+    # 15. Proposer la configuration HTTPS
+    if confirm_action "Voulez-vous configurer HTTPS pour ce site maintenant?"; then
+        configure_https "$domain_name"
+    else
+        show_info "Vous pourrez configurer HTTPS plus tard via le menu SSL/HTTPS."
+    fi
+    
+    return 0
 } 
