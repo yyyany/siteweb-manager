@@ -1,11 +1,13 @@
 # Avancement du Projet SiteWebManager
 
-## État d'avancement au 19/10/2023
+## État d'avancement au 20/10/2023
 
 ### Architecture et Structure
 - ✅ Structure de répertoires mise en place
 - ✅ Script principal (siteweb-manager.sh) créé
 - ✅ Configuration modulaire implémentée
+- ✅ Gestion cohérente des erreurs et vérifications
+- ✅ Optimisation des dépendances entre modules
 
 ### Modules implémentés
 - ✅ **Configuration (config/)**
@@ -26,61 +28,84 @@
   - ✅ Analyse des journaux
   - ✅ Sauvegardes système
 
-- ✅ **Interface utilisateur (ui/)**
-  - ✅ display.sh: Fonctions d'affichage et de formatage
-  - ✅ menus.sh: Menus interactifs et navigation
+- ✅ **Interface (ui/)**
+  - ✅ display.sh: Fonctions d'affichage
+  - ✅ menus.sh: Gestion des menus
 
 - ✅ **Apache (lib/apache.sh)**
-  - ✅ Installation et configuration d'Apache
-  - ✅ Gestion des services (démarrage, arrêt, redémarrage)
-  - ✅ Gestion des modules
-  - ✅ Configuration des ports
+  - ✅ Installation et configuration de base
+  - ✅ Gestion des hôtes virtuels
   - ✅ Optimisation des performances
-  - ✅ Sécurisation d'Apache
+  - ✅ Configuration des ports
+  - ✅ Gestion des modules
+  - ✅ Analyse des logs et statistiques
+  - ✅ Vérification et tests
 
-- ✅ **Gestion des sites (lib/sites.sh)**
+- ✅ **Sites Web (lib/sites.sh)**
   - ✅ Déploiement de sites
-  - ✅ Listage des sites existants
+  - ✅ Gestion des sites (activation, désactivation)
+  - ✅ Liste des sites
   - ✅ Suppression de sites
-  - ✅ Diagnostics et réparation de sites
+  - ✅ Sauvegarde et restauration
   - ✅ Vérification des DNS
-  - ✅ Importation automatique de sites (répertoire local, archive, dépôt Git)
+  - ✅ Import automatique de sites (local, zip, git)
 
 - ✅ **SSL/HTTPS (lib/ssl.sh)**
-  - ✅ Installation de Certbot (Let's Encrypt)
-  - ✅ Ajout de certificats SSL aux sites
-  - ✅ Renouvellement et vérification des certificats
-  - ✅ Configuration de la redirection HTTP vers HTTPS
-  - ✅ Tests de configuration SSL
-  - ✅ Configuration automatique du renouvellement
+  - ✅ Installation de Certbot
+  - ✅ Configuration SSL
+  - ✅ Renouvellement des certificats
+  - ✅ Test de configuration SSL
+  - ✅ Redirection HTTP vers HTTPS
 
-### Modules à implémenter
-- ❌ **PHP (lib/php.sh)**
-  - ❌ Installation et configuration de PHP
-  - ❌ Gestion des versions multiples
-  - ❌ Configuration des extensions
-  - ❌ Optimisation de PHP
+- ⚠️ **PHP (lib/php.sh)**
+  - ⚠️ Structure de base implémentée
+  - ❌ Détails à implémenter
 
-- ❌ **Bases de données (lib/db.sh)**
-  - ❌ Installation de MariaDB/MySQL
-  - ❌ Création/suppression de bases et utilisateurs
-  - ❌ Sauvegarde et restauration
-  - ❌ Sécurisation de la base de données
+- ⚠️ **Bases de données (lib/db.sh)**
+  - ⚠️ Structure de base implémentée
+  - ❌ Détails à implémenter
 
-### Documentation
-- ✅ Documentation_SiteWebV1.md (Manuel utilisateur script original)
-- ✅ Guide_Debogage_SiteWebV1.md (Guide de résolution des problèmes)
-- ✅ Avancement_Projet.md (Suivi de l'avancement du projet)
-- ❌ README.md (Documentation complète du nouveau système)
-- ❌ Guide d'utilisation détaillé
+### Modules restants à implémenter
+- ❌ **Monitoring (lib/monitoring.sh)**
+  - ❌ Surveillance des ressources
+  - ❌ Alertes
+  - ❌ Rapports
+
+- ❌ **Sécurité (lib/security.sh)**
+  - ❌ Audit de sécurité
+  - ❌ Hardening
+  - ❌ Configuration fail2ban avancée
+  - ❌ ModSecurity
+
+- ❌ **Email (lib/email.sh)**
+  - ❌ Configuration serveur mail
+  - ❌ Gestion des domaines mail
+  - ❌ Anti-spam et anti-virus
+
+- ❌ **FTP (lib/ftp.sh)**
+  - ❌ Installation et configuration
+  - ❌ Gestion des utilisateurs
+  - ❌ Sécurité
+
+### Optimisations apportées
+- ✅ Vérifications de préalables plus robustes
+- ✅ Refactorisation de code pour éviter les duplications
+- ✅ Meilleure gestion des erreurs et récupération
+- ✅ Vérification des outils disponibles
+- ✅ Cohérence de l'interface utilisateur
+- ✅ Ordre optimal de chargement des modules
+
+### Version actuelle
+- Version: 2.1.1
+- Date de mise à jour: 20/10/2023
 
 ## Prochaines étapes
 1. ✅ Implémenter le module Apache (lib/apache.sh)
 2. ✅ Implémenter le module de gestion des sites (lib/sites.sh)
 3. ✅ Implémenter le module SSL/HTTPS (lib/ssl.sh)
-4. Implémenter le module PHP (lib/php.sh)
-5. Implémenter le module de base de données (lib/db.sh)
-6. Finaliser la documentation
+4. 🔄 Implémenter le module PHP (lib/php.sh)
+5. 🔄 Implémenter le module de base de données (lib/db.sh)
+6. ❌ Finaliser la documentation
 
 ## Notes techniques
 - L'architecture modulaire facilite l'extension future du script
@@ -93,6 +118,7 @@
 - Les modules sont indépendants mais peuvent interagir entre eux
 
 ## Dernières modifications
+- **20/10/2023** : Correction des incohérences entre modules et préparation des modules PHP et DB
 - **19/10/2023** : Implémentation complète du module SSL/HTTPS (lib/ssl.sh)
 - **18/10/2023** : Implémentation complète du module de gestion des sites (lib/sites.sh)
 - **18/10/2023** : Implémentation complète du module Apache (lib/apache.sh) 

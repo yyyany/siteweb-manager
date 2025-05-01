@@ -80,7 +80,7 @@ check_prerequisites() {
     fi
     
     # Vérifier que nous sommes sur un système Debian/Ubuntu
-    if ! command_exists apt-get; then
+    if ! command_exists apt; then
         log_error "Ce script nécessite un système basé sur Debian/Ubuntu."
         exit 1
     fi
@@ -98,15 +98,15 @@ check_prerequisites() {
     # Vérifier et installer les outils de réseau
     if ! command_exists netstat; then
         log_warning "Commande netstat non trouvée. Installation de net-tools..."
-        apt-get update -qq
-        apt-get install -y net-tools
+        apt update -qq
+        apt install -y net-tools
     fi
     
     # Vérifier et installer les outils DNS
     if ! command_exists host; then
         log_warning "Commande host non trouvée. Installation de dnsutils..."
-        apt-get update -qq
-        apt-get install -y dnsutils
+        apt update -qq
+        apt install -y dnsutils
     fi
     
     # Vérifier les outils optionnels
@@ -117,9 +117,23 @@ check_prerequisites() {
     log_info "Prérequis vérifiés avec succès."
 }
 
-# Fonction pour obtenir l'adresse IP du serveur
+# Obtenir l'adresse IP du serveur (externe de préférence)
 get_server_ip() {
-    hostname -I | awk '{print $1}'
+    local server_ip=""
+    
+    # Essayer d'obtenir l'IP externe
+    if command_exists curl; then
+        server_ip=$(curl -s ifconfig.me 2>/dev/null)
+    elif command_exists wget; then
+        server_ip=$(wget -qO- ifconfig.me 2>/dev/null)
+    fi
+    
+    # Si impossible d'obtenir l'IP externe, utiliser l'IP interne principale
+    if [ -z "$server_ip" ]; then
+        server_ip=$(hostname -I | awk '{print $1}')
+    fi
+    
+    echo "$server_ip"
 }
 
 # Fonction pour valider un nom de domaine
@@ -131,12 +145,20 @@ validate_domain() {
     return 0
 }
 
-# Fonction pour valider un numéro de port
+# Valider un port réseau
 validate_port() {
-    local port=$1
-    if [[ ! "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    local port="$1"
+    
+    # Vérifier que le port est un nombre
+    if ! [[ "$port" =~ ^[0-9]+$ ]]; then
         return 1
     fi
+    
+    # Vérifier que le port est dans la plage valide (1-65535)
+    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        return 1
+    fi
+    
     return 0
 }
 

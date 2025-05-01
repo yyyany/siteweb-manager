@@ -5,207 +5,153 @@
 deploy_site() {
     log_info "Déploiement d'un nouveau site web..."
     
-    # Vérifier si Apache est installé
-    if ! command_exists apache2; then
-        show_error "Apache n'est pas installé. Installation requise avant de déployer un site."
-        
-        if confirm_action "Voulez-vous installer Apache maintenant?"; then
-            install_apache
-        else
-            return 1
-        fi
-    fi
-    
-    show_header "Déploiement d'un nouveau site"
-
-    # 1. Demander le nom du site
+    # Étape 1: Demander le nom du site (qui servira aussi de nom de dossier)
     local site_name=$(get_user_input "Entrez le nom du site (sera utilisé comme nom de dossier)" "" true)
+    site_name=$(echo "$site_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '_')
     
-    # 2. Demander le nom de domaine
-    local domain_name=$(get_user_input "Entrez le nom de domaine (ex: example.com)" "" true)
-    
-    # Valider le nom de domaine
-    if ! validate_domain "$domain_name"; then
-        show_error "Nom de domaine invalide: $domain_name"
+    if [ -z "$site_name" ]; then
+        show_error "Le nom du site ne peut pas être vide"
         return 1
     fi
     
-    # 3. Vérifier si le domaine existe déjà
-    if [ -f "$APACHE_AVAILABLE/$domain_name.conf" ]; then
-        show_error "Une configuration pour $domain_name existe déjà"
-        
-        if ! confirm_action "Voulez-vous écraser la configuration existante?"; then
-            return 1
-        fi
-        
-        # Désactiver le site existant
-        log_info "Désactivation du site existant..."
-        a2dissite "$domain_name.conf" >/dev/null 2>&1
+    # Étape 2: Demander le nom de domaine
+    local domain=$(get_user_input "Entrez le nom de domaine (ex: example.com)" "" true)
+    domain=$(echo "$domain" | tr '[:upper:]' '[:lower:]')
+    
+    if ! validate_domain "$domain"; then
+        show_error "Nom de domaine invalide: $domain"
+        return 1
     fi
     
-    # 4. Vérifier/créer le répertoire du site
+    # Vérifier si le site existe déjà
     if [ -d "$WWW_DIR/$site_name" ]; then
-        show_warning "Le répertoire $WWW_DIR/$site_name existe déjà"
+        show_warning "Le répertoire du site existe déjà: $WWW_DIR/$site_name"
         
-        if ! confirm_action "Voulez-vous utiliser ce répertoire existant?"; then
-            local new_site_name=$(get_user_input "Entrez un nouveau nom de répertoire" "$site_name-new")
-            site_name=$new_site_name
-        fi
-    fi
-    
-    # 5. Créer le répertoire s'il n'existe pas
-    if [ ! -d "$WWW_DIR/$site_name" ]; then
-        log_info "Création du répertoire $WWW_DIR/$site_name..."
-        
-        if ! mkdir -p "$WWW_DIR/$site_name"; then
-            show_error "Échec de la création du répertoire"
+        if ! confirm_action "Voulez-vous continuer et écraser le contenu existant?"; then
             return 1
         fi
     fi
     
-    # 6. Demander si l'utilisateur veut créer un index.html par défaut
-    if [ "$CREATE_DEFAULT_INDEX" = true ] || confirm_action "Voulez-vous créer une page index.html par défaut?"; then
-        log_info "Création de la page index.html par défaut..."
+    if [ -f "$APACHE_AVAILABLE/$domain.conf" ]; then
+        show_warning "La configuration Apache existe déjà: $APACHE_AVAILABLE/$domain.conf"
         
-        # Création de la page d'accueil par défaut
-        cat > "$WWW_DIR/$site_name/index.html" << EOF
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>$domain_name</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            background-color: #f5f5f5;
-            text-align: center;
-        }
-        .container {
-            max-width: 800px;
-            padding: 40px;
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            color: #333;
-            margin-bottom: 20px;
-        }
-        p {
-            color: #666;
-            margin-bottom: 15px;
-        }
-        .footer {
-            margin-top: 30px;
-            font-size: 0.9em;
-            color: #999;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Bienvenue sur $domain_name</h1>
-        <p>Votre site est correctement configuré et fonctionne parfaitement!</p>
-        <p>Vous pouvez maintenant remplacer cette page par votre contenu.</p>
-        <div class="footer">
-            <p>Site géré avec SiteWeb Manager</p>
-            <p>Date de création: $(date '+%d-%m-%Y')</p>
-        </div>
-    </div>
-</body>
-</html>
-EOF
+        if ! confirm_action "Voulez-vous continuer et écraser la configuration existante?"; then
+            return 1
+        fi
     fi
     
-    # 7. Configurer les permissions
-    log_info "Configuration des permissions..."
-    chown -R $DEFAULT_OWNER "$WWW_DIR/$site_name"
-    chmod -R $DEFAULT_PERMISSIONS "$WWW_DIR/$site_name"
+    # Étape 3: Créer le répertoire du site
+    log_info "Création du répertoire pour le site: $WWW_DIR/$site_name"
     
-    # 8. Créer la configuration Apache
-    log_info "Création de la configuration Apache..."
-    
-    # Sauvegarde si la configuration existe déjà
-    if [ -f "$APACHE_AVAILABLE/$domain_name.conf" ]; then
-        backup_file "$APACHE_AVAILABLE/$domain_name.conf"
+    if [ -d "$WWW_DIR/$site_name" ]; then
+        backup_dir "$WWW_DIR/$site_name"
+        rm -rf "$WWW_DIR/$site_name"
     fi
     
-    # Créer la configuration
-    cat > "$APACHE_AVAILABLE/$domain_name.conf" << EOF
+    mkdir -p "$WWW_DIR/$site_name"
+    
+    # Étape 4: Créer la page d'accueil par défaut
+    if [ "$CREATE_DEFAULT_INDEX" = true ]; then
+        log_info "Création de la page d'accueil par défaut..."
+        
+        generate_default_index "$WWW_DIR/$site_name" "$domain" "nouveau"
+    fi
+    
+    # Étape 5: Créer la configuration Apache
+    log_info "Création de la configuration Apache pour $domain..."
+    
+    cat > "$APACHE_AVAILABLE/$domain.conf" <<EOL
 <VirtualHost *:$DEFAULT_HTTP_PORT>
-    ServerName $domain_name
-    ServerAlias www.$domain_name
+    ServerName $domain
+    ServerAlias www.$domain
     DocumentRoot $WWW_DIR/$site_name
     
     <Directory $WWW_DIR/$site_name>
-        Options Indexes FollowSymLinks
+        Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
     </Directory>
     
-    ErrorLog \${APACHE_LOG_DIR}/${domain_name}_error.log
-    CustomLog \${APACHE_LOG_DIR}/${domain_name}_access.log combined
+    ErrorLog \${APACHE_LOG_DIR}/$domain-error.log
+    CustomLog \${APACHE_LOG_DIR}/$domain-access.log combined
+    
+    # Configuration optimisée
+    <IfModule mod_deflate.c>
+        AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/x-javascript
+    </IfModule>
+    
+    <IfModule mod_expires.c>
+        ExpiresActive On
+        ExpiresByType image/jpg "access plus 1 year"
+        ExpiresByType image/jpeg "access plus 1 year"
+        ExpiresByType image/gif "access plus 1 year"
+        ExpiresByType image/png "access plus 1 year"
+        ExpiresByType image/webp "access plus 1 year"
+        ExpiresByType text/css "access plus 1 month"
+        ExpiresByType application/pdf "access plus 1 month"
+        ExpiresByType text/javascript "access plus 1 month"
+        ExpiresByType application/javascript "access plus 1 month"
+        ExpiresByType image/x-icon "access plus 1 year"
+        ExpiresDefault "access plus 2 days"
+    </IfModule>
 </VirtualHost>
-EOF
+EOL
     
-    # 9. Activer le site
-    log_info "Activation du site..."
-    a2ensite "$domain_name.conf" >/dev/null 2>&1
+    # Étape 6: Activer le site
+    log_info "Activation du site $domain..."
+    a2ensite "$domain.conf" >/dev/null 2>&1
     
-    # 10. Vérifier la configuration Apache
-    log_info "Vérification de la configuration Apache..."
-    if ! apache2ctl configtest > /dev/null 2>&1; then
-        show_error "La configuration Apache contient des erreurs"
-        
-        if confirm_action "Voulez-vous consulter les erreurs?"; then
-            apache2ctl configtest
-        fi
-        
-        if confirm_action "Voulez-vous restaurer la configuration précédente?"; then
-            if [ -f "$APACHE_AVAILABLE/$domain_name.conf.bak" ]; then
-                cp "$APACHE_AVAILABLE/$domain_name.conf.bak" "$APACHE_AVAILABLE/$domain_name.conf"
-                show_success "Configuration restaurée"
-            else
-                rm "$APACHE_AVAILABLE/$domain_name.conf"
-                show_info "Configuration supprimée"
-            fi
-            
-            a2dissite "$domain_name.conf" >/dev/null 2>&1
-            return 1
-        fi
-    fi
-    
-    # 11. Redémarrer Apache
+    # Étape 7: Redémarrer Apache
     log_info "Redémarrage d'Apache..."
-    if ! systemctl restart apache2; then
+    if ! restart_apache; then
         show_error "Échec du redémarrage d'Apache"
         return 1
     fi
     
-    # 12. Afficher les informations de déploiement
-    show_success "Site $domain_name déployé avec succès!"
+    # Étape 8: Définir les permissions
+    log_info "Configuration des permissions..."
+    chown -R $DEFAULT_OWNER "$WWW_DIR/$site_name"
+    chmod -R $DEFAULT_PERMISSIONS "$WWW_DIR/$site_name"
+    find "$WWW_DIR/$site_name" -type f -exec chmod $DEFAULT_FILE_PERMISSIONS {} \;
     
-    # 13. Afficher les informations DNS
-    local server_ip=$(get_server_ip)
+    # Étape 9: Afficher les informations DNS
+    show_success "Site $domain déployé avec succès"
     
-    show_header "Configuration DNS requise"
+    # Récupérer l'adresse IP du serveur
+    local server_ip=""
+    
+    # Essayer différentes méthodes pour obtenir l'IP externe
+    if command_exists curl; then
+        server_ip=$(curl -s ifconfig.me 2>/dev/null)
+    elif command_exists wget; then
+        server_ip=$(wget -qO- ifconfig.me 2>/dev/null)
+    fi
+    
+    # Si l'IP externe n'est pas disponible, essayer l'IP interne principale
+    if [ -z "$server_ip" ]; then
+        server_ip=$(hostname -I | awk '{print $1}')
+    fi
+    
+    # Afficher les informations DNS à configurer
     show_info "Pour que votre site soit accessible, configurez les DNS suivants:"
-    echo -e "Type A:\t$domain_name\t→\t$server_ip"
-    echo -e "Type A:\twww.$domain_name\t→\t$server_ip"
+    echo -e "Type A: ${BOLD_YELLOW}$domain${NC}\t→\t${BOLD_CYAN}$server_ip${NC}"
+    echo -e "Type A: ${BOLD_YELLOW}www.$domain${NC}\t→\t${BOLD_CYAN}$server_ip${NC}"
     
-    # 14. Proposer la configuration HTTPS
+    # Étape 10: Proposer de configurer HTTPS
     if confirm_action "Voulez-vous configurer HTTPS pour ce site maintenant?"; then
-        configure_https "$domain_name"
+        configure_https "$domain"
     else
-        show_info "Vous pourrez configurer HTTPS plus tard via le menu SSL/HTTPS."
+        show_info "Vous pourrez configurer HTTPS plus tard via le menu SSL/HTTPS"
+    fi
+    
+    # Étape 11: Indiquer comment accéder au site
+    show_info "Votre site est accessible aux adresses suivantes:"
+    echo -e "http://$domain:$DEFAULT_HTTP_PORT"
+    echo -e "http://www.$domain:$DEFAULT_HTTP_PORT"
+    
+    if grep -q "SSLEngine on" "$APACHE_AVAILABLE/$domain.conf" || [ -f "$APACHE_AVAILABLE/$domain-le-ssl.conf" ]; then
+        echo -e "https://$domain:$DEFAULT_HTTPS_PORT"
+        echo -e "https://www.$domain:$DEFAULT_HTTPS_PORT"
     fi
     
     return 0
@@ -397,7 +343,7 @@ delete_site() {
         
         # Redémarrer Apache
         log_info "Redémarrage d'Apache..."
-        if ! systemctl restart apache2; then
+        if ! restart_apache; then
             show_error "Échec du redémarrage d'Apache"
         fi
         
@@ -538,6 +484,7 @@ EOF
             
             if [ "$current_owner" != "$DEFAULT_OWNER" ] || [ "$current_perms" != "$DEFAULT_PERMISSIONS" ]; then
                 if confirm_action "Voulez-vous corriger les permissions?"; then
+                    log_info "Correction des permissions pour $document_root..."
                     chown -R $DEFAULT_OWNER "$document_root"
                     chmod -R $DEFAULT_PERMISSIONS "$document_root"
                     show_success "Permissions corrigées"
@@ -549,63 +496,7 @@ EOF
                 show_warning "Aucun fichier index trouvé"
                 
                 if confirm_action "Voulez-vous créer un fichier index.html par défaut?"; then
-                    cat > "$document_root/index.html" << EOF
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>$domain_name</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            background-color: #f5f5f5;
-            text-align: center;
-        }
-        .container {
-            max-width: 800px;
-            padding: 40px;
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            color: #333;
-            margin-bottom: 20px;
-        }
-        p {
-            color: #666;
-            margin-bottom: 15px;
-        }
-        .footer {
-            margin-top: 30px;
-            font-size: 0.9em;
-            color: #999;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Bienvenue sur $domain_name</h1>
-        <p>Ce site a été réparé par SiteWeb Manager.</p>
-        <div class="footer">
-            <p>Site géré avec SiteWeb Manager</p>
-            <p>Date de réparation: $(date '+%d-%m-%Y')</p>
-        </div>
-    </div>
-</body>
-</html>
-EOF
-                    chown $DEFAULT_OWNER "$document_root/index.html"
-                    chmod $DEFAULT_FILE_PERMISSIONS "$document_root/index.html"
-                    show_success "Fichier index.html créé"
+                    generate_default_index "$document_root" "$domain_name" "réparé"
                 fi
             else
                 show_success "Fichier index trouvé"
@@ -619,63 +510,7 @@ EOF
                     chmod -R $DEFAULT_PERMISSIONS "$document_root"
                     
                     # Créer un fichier index par défaut
-                    cat > "$document_root/index.html" << EOF
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>$domain_name</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            background-color: #f5f5f5;
-            text-align: center;
-        }
-        .container {
-            max-width: 800px;
-            padding: 40px;
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            color: #333;
-            margin-bottom: 20px;
-        }
-        p {
-            color: #666;
-            margin-bottom: 15px;
-        }
-        .footer {
-            margin-top: 30px;
-            font-size: 0.9em;
-            color: #999;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Bienvenue sur $domain_name</h1>
-        <p>Ce répertoire a été créé par SiteWeb Manager.</p>
-        <div class="footer">
-            <p>Site géré avec SiteWeb Manager</p>
-            <p>Date de création: $(date '+%d-%m-%Y')</p>
-        </div>
-    </div>
-</body>
-</html>
-EOF
-                    chown $DEFAULT_OWNER "$document_root/index.html"
-                    chmod $DEFAULT_FILE_PERMISSIONS "$document_root/index.html"
-                    show_success "Répertoire et fichier index créés"
+                    generate_default_index "$document_root" "$domain_name" "réparé"
                 else
                     show_error "Échec de la création du répertoire"
                 fi
@@ -696,9 +531,7 @@ EOF
     
     # Proposer le redémarrage d'Apache
     if confirm_action "Voulez-vous redémarrer Apache pour appliquer les changements?"; then
-        if systemctl restart apache2; then
-            show_success "Apache redémarré avec succès"
-        else
+        if ! restart_apache; then
             show_error "Échec du redémarrage d'Apache"
         fi
     fi
@@ -822,17 +655,17 @@ import_site() {
     local site_name=$(get_user_input "Entrez le nom du site (sera utilisé comme nom de dossier)" "" true)
     
     # 2. Demander le nom de domaine
-    local domain_name=$(get_user_input "Entrez le nom de domaine (ex: example.com)" "" true)
+    local domain=$(get_user_input "Entrez le nom de domaine (ex: example.com)" "" true)
     
     # Valider le nom de domaine
-    if ! validate_domain "$domain_name"; then
-        show_error "Nom de domaine invalide: $domain_name"
+    if ! validate_domain "$domain"; then
+        show_error "Nom de domaine invalide: $domain"
         return 1
     fi
     
     # 3. Vérifier si le domaine existe déjà
-    if [ -f "$APACHE_AVAILABLE/$domain_name.conf" ]; then
-        show_error "Une configuration pour $domain_name existe déjà"
+    if [ -f "$APACHE_AVAILABLE/$domain.conf" ]; then
+        show_error "Une configuration pour $domain existe déjà"
         
         if ! confirm_action "Voulez-vous écraser la configuration existante?"; then
             return 1
@@ -840,7 +673,7 @@ import_site() {
         
         # Désactiver le site existant
         log_info "Désactivation du site existant..."
-        a2dissite "$domain_name.conf" >/dev/null 2>&1
+        a2dissite "$domain.conf" >/dev/null 2>&1
     fi
     
     # 4. Sélectionner la méthode d'importation
@@ -907,8 +740,18 @@ import_site() {
             if [[ "$archive_path" == *.zip ]]; then
                 # Vérifier si unzip est installé
                 if ! command_exists unzip; then
-                    show_warning "La commande unzip n'est pas installée. Installation..."
-                    apt update -qq && apt install -y unzip
+                    show_warning "La commande unzip n'est pas installée"
+                    if confirm_action "Voulez-vous installer unzip maintenant?"; then
+                        if apt update -qq && apt install -y unzip; then
+                            show_success "unzip installé avec succès"
+                        else
+                            show_error "Échec de l'installation de unzip"
+                            return 1
+                        fi
+                    else
+                        show_error "unzip est nécessaire pour extraire les archives .zip"
+                        return 1
+                    fi
                 fi
                 
                 unzip -q "$archive_path" -d "$target_dir"
@@ -935,8 +778,18 @@ import_site() {
         3) # Importer depuis un dépôt Git
             # Vérifier si git est installé
             if ! command_exists git; then
-                show_warning "Git n'est pas installé. Installation..."
-                apt update -qq && apt install -y git
+                show_warning "Git n'est pas installé"
+                if confirm_action "Voulez-vous installer git maintenant?"; then
+                    if apt update -qq && apt install -y git; then
+                        show_success "git installé avec succès"
+                    else
+                        show_error "Échec de l'installation de git"
+                        return 1
+                    fi
+                else
+                    show_error "git est nécessaire pour cloner des dépôts"
+                    return 1
+                fi
             fi
             
             local repo_url=$(get_user_input "Entrez l'URL du dépôt Git" "" true)
@@ -980,63 +833,7 @@ import_site() {
         show_warning "Aucun fichier index trouvé"
         
         if confirm_action "Voulez-vous créer un fichier index.html par défaut?"; then
-            cat > "$target_dir/index.html" << EOF
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>$domain_name</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            background-color: #f5f5f5;
-            text-align: center;
-        }
-        .container {
-            max-width: 800px;
-            padding: 40px;
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        h1 {
-            color: #333;
-            margin-bottom: 20px;
-        }
-        p {
-            color: #666;
-            margin-bottom: 15px;
-        }
-        .footer {
-            margin-top: 30px;
-            font-size: 0.9em;
-            color: #999;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Bienvenue sur $domain_name</h1>
-        <p>Site importé avec SiteWeb Manager.</p>
-        <div class="footer">
-            <p>Site géré avec SiteWeb Manager</p>
-            <p>Date d'importation: $(date '+%d-%m-%Y')</p>
-        </div>
-    </div>
-</body>
-</html>
-EOF
-            chown $DEFAULT_OWNER "$target_dir/index.html"
-            chmod $DEFAULT_FILE_PERMISSIONS "$target_dir/index.html"
-            show_success "Fichier index.html créé"
+            generate_default_index "$target_dir" "$domain" "importé"
         fi
     fi
     
@@ -1044,31 +841,51 @@ EOF
     log_info "Création de la configuration Apache..."
     
     # Sauvegarde si la configuration existe déjà
-    if [ -f "$APACHE_AVAILABLE/$domain_name.conf" ]; then
-        backup_file "$APACHE_AVAILABLE/$domain_name.conf"
+    if [ -f "$APACHE_AVAILABLE/$domain.conf" ]; then
+        backup_file "$APACHE_AVAILABLE/$domain.conf"
     fi
     
     # Créer la configuration
-    cat > "$APACHE_AVAILABLE/$domain_name.conf" << EOF
+    cat > "$APACHE_AVAILABLE/$domain.conf" <<EOL
 <VirtualHost *:$DEFAULT_HTTP_PORT>
-    ServerName $domain_name
-    ServerAlias www.$domain_name
+    ServerName $domain
+    ServerAlias www.$domain
     DocumentRoot $target_dir
     
     <Directory $target_dir>
-        Options Indexes FollowSymLinks
+        Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
     </Directory>
     
-    ErrorLog \${APACHE_LOG_DIR}/${domain_name}_error.log
-    CustomLog \${APACHE_LOG_DIR}/${domain_name}_access.log combined
+    ErrorLog \${APACHE_LOG_DIR}/$domain-error.log
+    CustomLog \${APACHE_LOG_DIR}/$domain-access.log combined
+    
+    # Configuration optimisée
+    <IfModule mod_deflate.c>
+        AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/x-javascript
+    </IfModule>
+    
+    <IfModule mod_expires.c>
+        ExpiresActive On
+        ExpiresByType image/jpg "access plus 1 year"
+        ExpiresByType image/jpeg "access plus 1 year"
+        ExpiresByType image/gif "access plus 1 year"
+        ExpiresByType image/png "access plus 1 year"
+        ExpiresByType image/webp "access plus 1 year"
+        ExpiresByType text/css "access plus 1 month"
+        ExpiresByType application/pdf "access plus 1 month"
+        ExpiresByType text/javascript "access plus 1 month"
+        ExpiresByType application/javascript "access plus 1 month"
+        ExpiresByType image/x-icon "access plus 1 year"
+        ExpiresDefault "access plus 2 days"
+    </IfModule>
 </VirtualHost>
-EOF
+EOL
     
     # 10. Activer le site
     log_info "Activation du site..."
-    a2ensite "$domain_name.conf" >/dev/null 2>&1
+    a2ensite "$domain.conf" >/dev/null 2>&1
     
     # 11. Vérifier la configuration Apache
     log_info "Vérification de la configuration Apache..."
@@ -1080,43 +897,172 @@ EOF
         fi
         
         if confirm_action "Voulez-vous restaurer la configuration précédente?"; then
-            if [ -f "$APACHE_AVAILABLE/$domain_name.conf.bak" ]; then
-                cp "$APACHE_AVAILABLE/$domain_name.conf.bak" "$APACHE_AVAILABLE/$domain_name.conf"
+            if [ -f "$APACHE_AVAILABLE/$domain.conf.bak" ]; then
+                cp "$APACHE_AVAILABLE/$domain.conf.bak" "$APACHE_AVAILABLE/$domain.conf"
                 show_success "Configuration restaurée"
             else
-                rm "$APACHE_AVAILABLE/$domain_name.conf"
+                rm "$APACHE_AVAILABLE/$domain.conf"
                 show_info "Configuration supprimée"
             fi
             
-            a2dissite "$domain_name.conf" >/dev/null 2>&1
+            a2dissite "$domain.conf" >/dev/null 2>&1
             return 1
         fi
     fi
     
     # 12. Redémarrer Apache
     log_info "Redémarrage d'Apache..."
-    if ! systemctl restart apache2; then
+    if ! restart_apache; then
         show_error "Échec du redémarrage d'Apache"
         return 1
     fi
     
     # 13. Afficher les informations de déploiement
-    show_success "Site $domain_name importé et déployé avec succès!"
+    show_success "Site $domain importé et déployé avec succès!"
     
     # 14. Afficher les informations DNS
     local server_ip=$(get_server_ip)
     
-    show_header "Configuration DNS requise"
     show_info "Pour que votre site soit accessible, configurez les DNS suivants:"
-    echo -e "Type A:\t$domain_name\t→\t$server_ip"
-    echo -e "Type A:\twww.$domain_name\t→\t$server_ip"
+    echo -e "Type A: ${BOLD_YELLOW}$domain${NC}\t→\t${BOLD_CYAN}$server_ip${NC}"
+    echo -e "Type A: ${BOLD_YELLOW}www.$domain${NC}\t→\t${BOLD_CYAN}$server_ip${NC}"
     
     # 15. Proposer la configuration HTTPS
     if confirm_action "Voulez-vous configurer HTTPS pour ce site maintenant?"; then
-        configure_https "$domain_name"
+        configure_https "$domain"
     else
         show_info "Vous pourrez configurer HTTPS plus tard via le menu SSL/HTTPS."
     fi
     
+    return 0
+}
+
+# Liste les sites disponibles avec leur configuration SSL
+list_available_sites() {
+    local title=${1:-"Sites disponibles"}
+    
+    show_header "$title"
+    
+    local count=0
+    local total_sites=0
+    
+    # Compter le nombre total de sites activés
+    total_sites=$(find $APACHE_ENABLED -type l | wc -l)
+    
+    if [ $total_sites -eq 0 ]; then
+        show_warning "Aucun site activé trouvé"
+        return 1
+    fi
+    
+    # Afficher les sites activés avec leur statut SSL
+    for site_config in $(find $APACHE_ENABLED -type l); do
+        count=$((count + 1))
+        local site_name=$(basename $site_config)
+        local domain=$(grep -m 1 "ServerName" "$site_config" | awk '{print $2}')
+        
+        if [ -z "$domain" ]; then
+            domain="<Domaine non défini>"
+        fi
+        
+        # Vérifier si le site a SSL configuré
+        if grep -q "SSLEngine on" "$site_config"; then
+            echo -e "$count. ${GREEN}$domain${NC} [${GREEN}SSL activé${NC}]"
+        else
+            echo -e "$count. ${GREEN}$domain${NC} [${RED}SSL non activé${NC}]"
+        fi
+    done
+    
+    echo ""
+    return 0
+}
+
+# Fonction pour générer un fichier index.html par défaut
+generate_default_index() {
+    local target_dir=$1
+    local domain_name=$2
+    local site_type=${3:-"nouveau"}
+    
+    if [ ! -d "$target_dir" ]; then
+        log_error "Répertoire cible non trouvé: $target_dir"
+        return 1
+    fi
+    
+    cat > "$target_dir/index.html" <<EOL
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bienvenue sur $domain_name</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(to bottom right, #f5f7fa, #c3cfe2);
+        }
+        .container {
+            max-width: 800px;
+            padding: 30px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        p {
+            margin-bottom: 20px;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 0.85em;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bienvenue sur $domain_name</h1>
+EOL
+
+    case "$site_type" in
+        "nouveau")
+            echo '        <p>Ce site est hébergé par SiteWeb Manager.</p>' >> "$target_dir/index.html"
+            echo '        <p>Remplacez ce fichier <code>index.html</code> par votre contenu.</p>' >> "$target_dir/index.html"
+            ;;
+        "importé")
+            echo '        <p>Site importé avec SiteWeb Manager.</p>' >> "$target_dir/index.html"
+            ;;
+        "réparé")
+            echo '        <p>Ce site a été réparé par SiteWeb Manager.</p>' >> "$target_dir/index.html"
+            ;;
+        *)
+            echo '        <p>Site géré par SiteWeb Manager.</p>' >> "$target_dir/index.html"
+            ;;
+    esac
+
+    cat >> "$target_dir/index.html" <<EOL
+        <div class="footer">
+            <p>Site créé le $(date '+%d/%m/%Y à %H:%M')</p>
+        </div>
+    </div>
+</body>
+</html>
+EOL
+
+    # Définir les bonnes permissions
+    chown $DEFAULT_OWNER "$target_dir/index.html"
+    chmod $DEFAULT_FILE_PERMISSIONS "$target_dir/index.html"
+    
+    log_info "Fichier index.html par défaut créé pour $domain_name"
     return 0
 } 

@@ -66,7 +66,11 @@ install_certbot() {
         a2enmod ssl >/dev/null 2>&1
         
         # Redémarrer Apache
-        systemctl restart apache2
+        log_info "Redémarrage d'Apache..."
+        if ! restart_apache; then
+            show_error "Échec du redémarrage d'Apache"
+            return 1
+        fi
         
         show_certbot_info
         
@@ -107,17 +111,26 @@ add_ssl_to_site() {
         
         if confirm_action "Voulez-vous l'installer maintenant?"; then
             apt update && apt install -y python3-certbot-apache
-            systemctl restart apache2
+            log_info "Redémarrage d'Apache..."
+            if ! restart_apache; then
+                show_error "Échec du redémarrage d'Apache"
+                return 1
+            fi
         else
             return 1
         fi
     fi
     
-    # Lister les sites disponibles
+    # Lister les sites disponibles en utilisant la fonction depuis sites.sh
     list_available_sites "Sélectionnez un site pour ajouter SSL"
     
-    # Demander le nom du site
-    local choice=$(get_user_choice "Entrez le numéro du site" $(expr $(find $APACHE_ENABLED -type l | wc -l) + 1))
+    # Demander le nom du site, sauf si un choix préexistant est défini
+    local choice
+    if [ -n "$SSL_SITE_PRESET_CHOICE" ]; then
+        choice=$SSL_SITE_PRESET_CHOICE
+    else
+        choice=$(get_user_choice "Entrez le numéro du site" $(expr $(find $APACHE_ENABLED -type l | wc -l) + 1))
+    fi
     
     if [ $choice -eq 0 ]; then
         return 0
@@ -141,7 +154,10 @@ add_ssl_to_site() {
     # Demander des domaines supplémentaires
     local add_domains=""
     if confirm_action "Voulez-vous ajouter des domaines supplémentaires au certificat?"; then
-        add_domains=$(get_user_input "Entrez les domaines supplémentaires, séparés par des espaces" "")
+        add_domains=$(get_user_input "Entrez les domaines supplémentaires, séparés par des espaces" "www.$domain")
+    else
+        # Par défaut, ajouter le www
+        add_domains="www.$domain"
     fi
     
     # Construction de la commande Certbot
@@ -173,9 +189,25 @@ add_ssl_to_site() {
     # Vérifier le résultat
     if [ $? -eq 0 ]; then
         show_success "Certificat SSL installé avec succès pour $domain"
+        
+        # Configurer le renouvellement automatique si ce n'est pas déjà fait
+        if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
+            if confirm_action "Voulez-vous configurer le renouvellement automatique des certificats?"; then
+                configure_ssl_renewal_cron
+            fi
+        fi
+        
         return 0
     else
         show_error "Échec de l'installation du certificat SSL pour $domain"
+        
+        # Afficher des conseils en cas d'échec
+        echo -e "\n${YELLOW}Conseils en cas d'échec:${NC}"
+        echo "1. Vérifiez que le domaine pointe correctement vers ce serveur"
+        echo "2. Assurez-vous que le port 80 et 443 sont ouverts sur votre pare-feu"
+        echo "3. Let's Encrypt a des limites de taux, attendez une heure si vous avez fait trop de tentatives"
+        echo "4. Vous pouvez essayer avec l'option --staging pour tester sans compter dans les limites"
+        
         return 1
     fi
 }
@@ -304,7 +336,11 @@ remove_ssl() {
             sed -i 's/<VirtualHost \*:443>/<VirtualHost *:80>/' "$site_config"
             
             # Redémarrer Apache
-            systemctl restart apache2
+            log_info "Redémarrage d'Apache..."
+            if ! restart_apache; then
+                show_error "Échec du redémarrage d'Apache"
+                return 1
+            fi
             
             show_success "Configuration Apache mise à jour pour $domain"
         fi
@@ -362,7 +398,11 @@ configure_https_redirect() {
             sed -i '/RewriteRule \^ https:\/\/%{SERVER_NAME}/d' "$site_config"
             
             # Redémarrer Apache
-            systemctl restart apache2
+            log_info "Redémarrage d'Apache..."
+            if ! restart_apache; then
+                show_error "Échec du redémarrage d'Apache"
+                return 1
+            fi
             
             show_success "Redirection HTTPS désactivée pour $domain"
         fi
@@ -392,7 +432,11 @@ configure_https_redirect() {
     a2enmod rewrite >/dev/null 2>&1
     
     # Redémarrer Apache
-    systemctl restart apache2
+    log_info "Redémarrage d'Apache..."
+    if ! restart_apache; then
+        show_error "Échec du redémarrage d'Apache"
+        return 1
+    fi
     
     show_success "Redirection HTTP vers HTTPS configurée pour $domain"
     return 0
@@ -404,27 +448,54 @@ test_ssl_config() {
     
     # Vérifier si OpenSSL est installé
     if ! command_exists openssl; then
-        show_warning "OpenSSL n'est pas installé. Installation..."
-        apt update && apt install -y openssl
+        show_warning "OpenSSL n'est pas installé."
+        if confirm_action "Voulez-vous installer OpenSSL maintenant?"; then
+            if apt update && apt install -y openssl; then
+                show_success "OpenSSL installé avec succès"
+            else
+                show_error "Échec de l'installation d'OpenSSL"
+                return 1
+            fi
+        else
+            show_warning "OpenSSL est nécessaire pour tester les certificats SSL"
+            return 1
+        fi
     fi
     
     # Demander le domaine à tester
     local domain=$(get_user_input "Entrez le nom de domaine à tester" "" true)
     
+    # Vérifier que le domaine est accessible
+    log_info "Vérification de l'accessibilité de $domain..."
+    if ! ping -c 1 $domain >/dev/null 2>&1; then
+        show_warning "Le domaine $domain ne semble pas être accessible"
+        if ! confirm_action "Voulez-vous continuer quand même?"; then
+            return 1
+        fi
+    fi
+    
     # Tester le domaine avec OpenSSL
     show_info "Test du certificat SSL pour $domain..."
     echo -e "${YELLOW}Informations sur le certificat :${NC}"
-    echo | openssl s_client -servername $domain -connect $domain:443 2>/dev/null | openssl x509 -noout -dates -issuer -subject
+    if ! echo | openssl s_client -servername $domain -connect $domain:443 2>/dev/null | openssl x509 -noout -dates -issuer -subject; then
+        show_error "Impossible de se connecter à $domain:443 ou aucun certificat SSL n'est configuré"
+        return 1
+    fi
     
     # Tester avec la commande SSL Labs si disponible
     if command_exists sslscan; then
         echo -e "\n${YELLOW}Résultats du scan SSL :${NC}"
         sslscan --no-colour $domain
     else
+        show_warning "L'outil sslscan n'est pas installé."
         if confirm_action "Voulez-vous installer sslscan pour une analyse plus détaillée?"; then
-            apt update && apt install -y sslscan
-            echo -e "\n${YELLOW}Résultats du scan SSL :${NC}"
-            sslscan --no-colour $domain
+            if apt update && apt install -y sslscan; then
+                show_success "sslscan installé avec succès"
+                echo -e "\n${YELLOW}Résultats du scan SSL :${NC}"
+                sslscan --no-colour $domain
+            else
+                show_error "Échec de l'installation de sslscan"
+            fi
         fi
     fi
     
@@ -436,45 +507,6 @@ test_ssl_config() {
     echo -e "4. Activez HTTP Strict Transport Security (HSTS)"
     echo -e "5. Supprimez les protocoles et chiffrements faibles"
     
-    return 0
-}
-
-# Liste les sites disponibles avec leur configuration SSL
-list_available_sites() {
-    local title=${1:-"Sites disponibles"}
-    
-    show_header "$title"
-    
-    local count=0
-    local total_sites=0
-    
-    # Compter le nombre total de sites activés
-    total_sites=$(find $APACHE_ENABLED -type l | wc -l)
-    
-    if [ $total_sites -eq 0 ]; then
-        show_warning "Aucun site activé trouvé"
-        return 1
-    fi
-    
-    # Afficher les sites activés avec leur statut SSL
-    for site_config in $(find $APACHE_ENABLED -type l); do
-        count=$((count + 1))
-        local site_name=$(basename $site_config)
-        local domain=$(grep -m 1 "ServerName" "$site_config" | awk '{print $2}')
-        
-        if [ -z "$domain" ]; then
-            domain="<Domaine non défini>"
-        fi
-        
-        # Vérifier si le site a SSL configuré
-        if grep -q "SSLEngine on" "$site_config"; then
-            echo -e "$count. ${GREEN}$domain${NC} [${GREEN}SSL activé${NC}]"
-        else
-            echo -e "$count. ${GREEN}$domain${NC} [${RED}SSL non activé${NC}]"
-        fi
-    done
-    
-    echo ""
     return 0
 }
 
@@ -512,4 +544,91 @@ configure_ssl_renewal_cron() {
     crontab -l | grep "certbot renew"
     
     return 0
+}
+
+# Configurer HTTPS pour un domaine spécifique (appelé depuis deploy_site ou import_site)
+configure_https() {
+    local domain=$1
+    
+    if [ -z "$domain" ]; then
+        domain=$(get_user_input "Entrez le nom de domaine pour configurer HTTPS" "" true)
+    fi
+    
+    log_info "Configuration HTTPS pour $domain..."
+    
+    # Vérifier si Certbot est installé
+    if ! command_exists certbot; then
+        show_warning "Certbot n'est pas installé"
+        
+        if confirm_action "Voulez-vous installer Certbot maintenant?"; then
+            install_certbot
+        else
+            return 1
+        fi
+    fi
+    
+    # Vérifier si le site est activé
+    if [ ! -f "$APACHE_AVAILABLE/$domain.conf" ]; then
+        show_error "Configuration Apache non trouvée pour $domain"
+        return 1
+    fi
+    
+    if [ ! -L "$APACHE_ENABLED/$domain.conf" ]; then
+        show_warning "Le site $domain n'est pas activé"
+        
+        if confirm_action "Voulez-vous activer le site maintenant?"; then
+            a2ensite "$domain.conf" >/dev/null 2>&1
+            log_info "Redémarrage d'Apache..."
+            if ! restart_apache; then
+                show_error "Échec du redémarrage d'Apache"
+                return 1
+            fi
+        else
+            return 1
+        fi
+    fi
+    
+    # Vérifier si le certificat existe déjà
+    if [ -f "$APACHE_AVAILABLE/$domain-le-ssl.conf" ] || grep -q "SSLEngine on" "$APACHE_AVAILABLE/$domain.conf"; then
+        show_warning "HTTPS semble déjà configuré pour $domain"
+        
+        if ! confirm_action "Voulez-vous reconfigurer HTTPS?"; then
+            return 0
+        fi
+    fi
+    
+    # Au lieu de dupliquer le code, on utilise add_ssl_to_site
+    # mais on doit simuler le choix du site dans le menu
+    # Pour cela, on trouve l'index du site dans la liste
+    
+    # Obtenir la liste des sites activés
+    local sites_list=()
+    local site_index=0
+    local i=1
+    
+    for site_conf in $(find $APACHE_ENABLED -type l); do
+        local site_name=$(basename $site_conf)
+        local site_domain=$(grep -m 1 "ServerName" "$site_conf" | awk '{print $2}')
+        
+        sites_list[$i]="$site_name"
+        
+        if [ "$site_domain" = "$domain" ]; then
+            site_index=$i
+        fi
+        
+        ((i++))
+    done
+    
+    if [ $site_index -eq 0 ]; then
+        show_error "Impossible de trouver le site $domain dans la liste des sites activés"
+        return 1
+    fi
+    
+    # Appeler add_ssl_to_site avec le site déjà identifié
+    # Nous passons l'information par une variable d'environnement temporaire
+    export SSL_SITE_PRESET_CHOICE=$site_index
+    add_ssl_to_site
+    unset SSL_SITE_PRESET_CHOICE
+    
+    return $?
 } 

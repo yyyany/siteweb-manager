@@ -11,26 +11,69 @@ install_apache() {
         return 0
     fi
     
+    # Vérifier si apt est disponible (Debian/Ubuntu)
+    if ! command -v apt >/dev/null 2>&1; then
+        show_error "Cette fonction nécessite apt (Debian/Ubuntu)"
+        return 1
+    fi
+    
     # Installation d'Apache
     show_info "Installation du serveur web Apache..."
-    if apt update && apt install -y apache2; then
+    
+    # Mettre à jour la liste des paquets
+    if ! apt update; then
+        show_error "Échec de la mise à jour de la liste des paquets"
+        return 1
+    fi
+    
+    # Installer Apache
+    if apt install -y apache2; then
         show_success "Apache installé avec succès"
         
         # Activation des modules essentiels
-        a2enmod rewrite
-        a2enmod headers
+        log_info "Activation des modules essentiels..."
+        if ! a2enmod rewrite; then
+            show_warning "Échec de l'activation du module rewrite"
+        fi
+        
+        if ! a2enmod headers; then
+            show_warning "Échec de l'activation du module headers"
+        fi
         
         # Configuration du pare-feu
-        if command_exists ufw && ufw status | grep -q "Status: active"; then
-            show_info "Configuration du pare-feu..."
-            ufw allow 'Apache'
-            ufw allow 'Apache Full'
-            show_success "Règles de pare-feu configurées"
+        if command_exists ufw; then
+            log_info "Vérification du statut de UFW..."
+            if ufw status | grep -q "Status: active"; then
+                show_info "Configuration du pare-feu..."
+                ufw allow 'Apache'
+                ufw allow 'Apache Full'
+                show_success "Règles de pare-feu configurées"
+            else
+                show_info "UFW n'est pas activé, aucune règle de pare-feu configurée"
+                if confirm_action "Voulez-vous activer UFW maintenant?"; then
+                    if echo "y" | ufw enable; then
+                        ufw allow 'Apache'
+                        ufw allow 'Apache Full'
+                        show_success "UFW activé et règles de pare-feu configurées"
+                    else
+                        show_error "Échec de l'activation d'UFW"
+                    fi
+                fi
+            fi
+        else
+            show_info "UFW n'est pas installé, aucune règle de pare-feu configurée"
         fi
         
         # Démarrage du service
-        systemctl start apache2
-        systemctl enable apache2
+        log_info "Démarrage et activation d'Apache..."
+        if ! systemctl start apache2; then
+            show_error "Échec du démarrage d'Apache"
+            return 1
+        fi
+        
+        if ! systemctl enable apache2; then
+            show_warning "Échec de l'activation du démarrage automatique d'Apache"
+        fi
         
         show_info "Apache est maintenant installé et configuré"
         
@@ -241,6 +284,15 @@ configure_apache_ports() {
         return 1
     fi
     
+    # Vérifier si netstat est disponible
+    if ! command_exists netstat && ! command_exists ss; then
+        if confirm_action "L'outil netstat/ss n'est pas disponible. Voulez-vous installer net-tools?"; then
+            apt update && apt install -y net-tools
+        else
+            show_warning "Sans netstat/ss, la vérification des ports déjà utilisés ne sera pas possible"
+        fi
+    fi
+    
     # Récupérer le port HTTP actuel
     local current_http_port=$(grep -E "^Listen " /etc/apache2/ports.conf | grep -v 443 | awk '{print $2}')
     current_http_port=${current_http_port:-80}
@@ -261,6 +313,29 @@ configure_apache_ports() {
         return 1
     fi
     
+    # Vérifier si le port est déjà utilisé
+    if command_exists netstat; then
+        if netstat -tuln | grep -q ":$new_http_port "; then
+            if [ "$new_http_port" != "$current_http_port" ]; then
+                show_error "Le port $new_http_port est déjà utilisé par un autre service"
+                
+                if ! confirm_action "Voulez-vous continuer quand même?"; then
+                    return 1
+                fi
+            fi
+        fi
+    elif command_exists ss; then
+        if ss -tuln | grep -q ":$new_http_port "; then
+            if [ "$new_http_port" != "$current_http_port" ]; then
+                show_error "Le port $new_http_port est déjà utilisé par un autre service"
+                
+                if ! confirm_action "Voulez-vous continuer quand même?"; then
+                    return 1
+                fi
+            fi
+        fi
+    fi
+    
     # Demander le nouveau port HTTPS
     local new_https_port=$(get_user_input "Entrez le nouveau port HTTPS" "$current_https_port")
     
@@ -268,6 +343,29 @@ configure_apache_ports() {
     if ! validate_port "$new_https_port"; then
         show_error "Port HTTPS invalide : $new_https_port"
         return 1
+    fi
+    
+    # Vérifier si le port est déjà utilisé
+    if command_exists netstat; then
+        if netstat -tuln | grep -q ":$new_https_port "; then
+            if [ "$new_https_port" != "$current_https_port" ]; then
+                show_error "Le port $new_https_port est déjà utilisé par un autre service"
+                
+                if ! confirm_action "Voulez-vous continuer quand même?"; then
+                    return 1
+                fi
+            fi
+        fi
+    elif command_exists ss; then
+        if ss -tuln | grep -q ":$new_https_port "; then
+            if [ "$new_https_port" != "$current_https_port" ]; then
+                show_error "Le port $new_https_port est déjà utilisé par un autre service"
+                
+                if ! confirm_action "Voulez-vous continuer quand même?"; then
+                    return 1
+                fi
+            fi
+        fi
     fi
     
     # Vérifier que les ports sont différents
@@ -280,10 +378,12 @@ configure_apache_ports() {
     backup_file "/etc/apache2/ports.conf"
     
     # Modifier les ports
+    log_info "Modification des ports dans la configuration Apache..."
     sed -i "s/^Listen $current_http_port$/Listen $new_http_port/" /etc/apache2/ports.conf
     sed -i "s/^Listen $current_https_port$/Listen $new_https_port/" /etc/apache2/ports.conf
     
     # Mettre à jour les hôtes virtuels
+    log_info "Mise à jour des configurations de sites..."
     for site_conf in "$APACHE_AVAILABLE"/*.conf; do
         backup_file "$site_conf"
         
@@ -295,6 +395,7 @@ configure_apache_ports() {
     done
     
     # Vérifier la configuration
+    log_info "Vérification de la nouvelle configuration..."
     if apache2ctl configtest; then
         show_success "Configuration des ports mise à jour avec succès"
         
@@ -303,10 +404,12 @@ configure_apache_ports() {
             show_info "Mise à jour des règles du pare-feu..."
             
             # Supprimer les anciennes règles
-            ufw delete allow $current_http_port/tcp
-            ufw delete allow $current_https_port/tcp
+            log_info "Suppression des anciennes règles du pare-feu..."
+            ufw delete allow $current_http_port/tcp 2>/dev/null
+            ufw delete allow $current_https_port/tcp 2>/dev/null
             
             # Ajouter les nouvelles règles
+            log_info "Ajout des nouvelles règles du pare-feu..."
             ufw allow $new_http_port/tcp
             ufw allow $new_https_port/tcp
             
@@ -314,23 +417,38 @@ configure_apache_ports() {
         fi
         
         # Redémarrer Apache
-        restart_apache
+        log_info "Redémarrage d'Apache..."
+        if restart_apache; then
+            show_success "Apache redémarré avec succès"
+        else
+            show_error "Échec du redémarrage d'Apache"
+            log_info "Tentative de restauration..."
+            cp "/etc/apache2/ports.conf.bak" "/etc/apache2/ports.conf"
+            restart_apache
+            return 1
+        fi
         
         # Mettre à jour la configuration
+        log_info "Mise à jour des variables de configuration..."
         DEFAULT_HTTP_PORT=$new_http_port
         DEFAULT_HTTPS_PORT=$new_https_port
+        
+        show_warning "IMPORTANT : Notez les nouveaux ports HTTP/HTTPS : $new_http_port/$new_https_port"
         
         return 0
     else
         show_error "Erreur dans la configuration des ports"
         
         # Restaurer la configuration
+        log_info "Restauration de la configuration..."
         cp "/etc/apache2/ports.conf.bak" "/etc/apache2/ports.conf"
         
         # Restaurer les fichiers de configuration des sites
         for site_conf in "$APACHE_AVAILABLE"/*.conf.bak; do
             original_conf="${site_conf%.bak}"
-            cp "$site_conf" "$original_conf"
+            if [ -f "$site_conf" ]; then
+                cp "$site_conf" "$original_conf"
+            fi
         done
         
         show_info "Configuration restaurée"
