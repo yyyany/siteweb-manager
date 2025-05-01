@@ -2,22 +2,38 @@
 # Version du script
 VERSION="1.21"
 
-# Détection du chemin du script
+# Détection du chemin absolu du script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 BASE_DIR="$SCRIPT_DIR"
 
+# Affichage du chemin pour vérification
+echo "Chemin d'exécution: $BASE_DIR"
+
 # Chargement de la configuration
-source "$BASE_DIR/config/config.sh"
+if [ -f "$BASE_DIR/config/config.sh" ]; then
+    source "$BASE_DIR/config/config.sh"
+else
+    echo "ERREUR: Fichier de configuration non trouvé: $BASE_DIR/config/config.sh"
+    exit 1
+fi
 
 # Chargement des modules
-source "$BASE_DIR/lib/utils.sh"
-source "$BASE_DIR/lib/system.sh"
-source "$BASE_DIR/lib/apache.sh"
-source "$BASE_DIR/lib/sites.sh"
-source "$BASE_DIR/lib/ssl.sh"
+for module in "$BASE_DIR/lib/utils.sh" "$BASE_DIR/lib/system.sh" "$BASE_DIR/lib/apache.sh" "$BASE_DIR/lib/sites.sh" "$BASE_DIR/lib/ssl.sh"; do
+    if [ -f "$module" ]; then
+        source "$module"
+    else
+        echo "ERREUR: Module non trouvé: $module"
+        exit 1
+    fi
+done
 
 # Chargement de l'interface utilisateur
-source "$BASE_DIR/ui/menus.sh"
+if [ -f "$BASE_DIR/ui/menus.sh" ]; then
+    source "$BASE_DIR/ui/menus.sh"
+else
+    echo "ERREUR: Interface utilisateur non trouvée: $BASE_DIR/ui/menus.sh"
+    exit 1
+fi
 
 # Lancement du menu principal
 show_menu
