@@ -41,7 +41,7 @@ SiteWeb Manager est un outil de gestion de sites web et de services associés po
 
 1. Clonez le dépôt :
 ```bash
-git clone https://github.com/votre-utilisateur/siteweb-manager.git
+git clone https://github.com/yyyany/siteweb-manager.git
 cd siteweb-manager
 ```
 
