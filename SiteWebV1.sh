@@ -272,19 +272,63 @@ deploy_site() {
     echo -e "${BLUE}║${NC}        ${GREEN}Déploiement d'un Site Web${NC}          ${BLUE}║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}\n"
 
-    # Lister les dossiers disponibles
-    echo -e "${YELLOW}Dossiers disponibles :${NC}"
-    ls -d */ 2>/dev/null || echo "Aucun dossier trouvé"
-    echo ""
-
-    # Demander le nom du dossier
-    echo -e "${YELLOW}Entrez le nom du dossier du site : ${NC}"
-    read site_name
-
-    # Vérifier si le dossier existe
-    if [ ! -d "$site_name" ]; then
-        log_error "Le dossier $site_name n'existe pas"
-        return 1
+    # Demander comment sélectionner le dossier
+    echo -e "${YELLOW}Comment voulez-vous sélectionner le dossier du site?${NC}"
+    echo -e "${YELLOW}[1]${NC} Sélectionner parmi les dossiers disponibles"
+    echo -e "${YELLOW}[2]${NC} Spécifier manuellement le chemin complet du dossier"
+    read -p "$(echo -e ${YELLOW}Votre choix [1-2]${NC}: )" selection_choice
+    
+    site_name=""
+    
+    if [ "$selection_choice" = "1" ]; then
+        # Option 1: Lister les dossiers disponibles
+        echo -e "\n${YELLOW}Dossiers disponibles (ceux contenant un index.html ou index.php sont marqués avec *) :${NC}"
+        
+        # Trouver tous les dossiers du répertoire courant
+        folders=()
+        i=1
+        
+        # Pour chaque dossier dans le répertoire courant
+        for folder in */; do
+            folder=${folder%/} # Enlever le slash final
+            
+            # Vérifier si le dossier contient un fichier index.html ou index.php
+            if [ -f "$folder/index.html" ] || [ -f "$folder/index.php" ]; then
+                echo -e "${YELLOW}[$i]${NC} $folder ${GREEN}*${NC}"
+            else
+                echo -e "${YELLOW}[$i]${NC} $folder"
+            fi
+            
+            folders[$i]=$folder
+            i=$((i+1))
+        done
+        
+        if [ ${#folders[@]} -eq 0 ]; then
+            echo "Aucun dossier trouvé"
+            return 1
+        fi
+        
+        # Demander le choix du dossier
+        read -p "$(echo -e ${YELLOW}Entrez le numéro du dossier à déployer [1-$((i-1))]${NC}: )" folder_number
+        
+        if [ "$folder_number" -ge 1 ] && [ "$folder_number" -lt "$i" ]; then
+            site_name=${folders[$folder_number]}
+        else
+            log_error "Numéro de dossier invalide"
+            return 1
+        fi
+    else
+        # Option 2: Spécifier manuellement le chemin
+        read -p "$(echo -e ${YELLOW}Entrez le chemin complet du dossier du site${NC}: )" site_path
+        
+        # Vérifier si le chemin existe
+        if [ ! -d "$site_path" ]; then
+            log_error "Le dossier $site_path n'existe pas"
+            return 1
+        fi
+        
+        # Extraire le nom du dossier du chemin
+        site_name=$(basename "$site_path")
     fi
 
     # Demander le nom de domaine
@@ -297,7 +341,13 @@ deploy_site() {
     sudo mkdir -p "/var/www/$site_name"
     
     # Copier les fichiers
-    sudo cp -r "$site_name"/* "/var/www/$site_name/"
+    if [ "$selection_choice" = "1" ]; then
+        # Si sélection parmi les dossiers listés
+        sudo cp -r "$site_name"/* "/var/www/$site_name/"
+    else
+        # Si chemin spécifié manuellement
+        sudo cp -r "$site_path"/* "/var/www/$site_name/"
+    fi
     
     # Configurer les permissions
     sudo chown -R www-data:www-data "/var/www/$site_name"

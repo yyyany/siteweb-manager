@@ -1,380 +1,216 @@
 #!/bin/bash
-# Module de gestion des menus
 
-# Menu principal
-show_main_menu() {
+# Menu de gestion des sites
+manage_sites() {
     while true; do
-        show_menu "Menu Principal" \
-            "Mise à jour du système" \
-            "Gestion d'Apache" \
-            "Gestion des sites web" \
-            "Gestion de PHP" \
-            "Gestion des bases de données" \
-            "Informations système" \
-            "Configuration et sécurité" \
-            "quit"
+        clear
+        show_bash_version
+        echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║${NC}        ${GREEN}Gestion des Sites Web${NC}              ${BLUE}║${NC}"
+        echo -e "${BLUE}╠════════════════════════════════════════════╣${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[1]${NC} Déployer un nouveau site            ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[2]${NC} Liste des sites déployés            ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[3]${NC} Supprimer un site                   ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[4]${NC} Configurer HTTPS                    ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[5]${NC} Vérifier/Réparer un site            ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[6]${NC} Diagnostic SSL/HTTPS                ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[7]${NC} Vérifier les DNS                    ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[8]${NC} Vérifier config hôtes virtuels      ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${RED}[0]${NC} Retour                              ${BLUE}║${NC}"
+        echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
         
-        choice=$(get_user_choice "Entrez votre choix" 7)
-        
-        case $choice in
-            1) system_update_menu ;;
-            2) apache_menu ;;
-            3) sites_menu ;;
-            4) php_menu ;;
-            5) database_menu ;;
-            6) show_system_info; pause ;;
-            7) security_menu ;;
-            0) 
-                show_header "Au revoir!"
-                log_info "Fin du programme"
-                exit 0 
+        read -p "$(echo -e ${YELLOW}Entrez votre choix [0-8]${NC}: )" site_choice
+
+        case $site_choice in
+            1) deploy_site ;;
+            2)
+                echo -e "\n${YELLOW}Sites disponibles :${NC}"
+                ls -l /etc/apache2/sites-available/
+                echo -e "\n${YELLOW}Sites activés :${NC}"
+                ls -l /etc/apache2/sites-enabled/
                 ;;
-            *) 
-                show_error "Option invalide"
+            3)
+                clear
+                echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+                echo -e "${BLUE}║${NC}        ${GREEN}Suppression d'un Site${NC}              ${BLUE}║${NC}"
+                echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}\n"
+
+                echo -e "${YELLOW}Sites disponibles :${NC}\n"
+                
+                # Liste simple des sites
+                num=1
+                declare -a site_list
+                
+                for site in /etc/apache2/sites-available/*.conf; do
+                    site_name=$(basename "$site")
+                    if [ "$site_name" != "000-default.conf" ] && [ "$site_name" != "default-ssl.conf" ]; then
+                        site_list[$num]=$site_name
+                        if [ -L "/etc/apache2/sites-enabled/$site_name" ]; then
+                            status="${GREEN}(activé)${NC}"
+                        else
+                            status="${RED}(désactivé)${NC}"
+                        fi
+                        echo -e "${YELLOW}[$num]${NC} $site_name $status"
+                        num=$((num + 1))
+                    fi
+                done
+
+                if [ $num -eq 1 ]; then
+                    echo -e "${RED}Aucun site personnalisé trouvé${NC}"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+
+                echo -e "${RED}[0]${NC} Annuler\n"
+                read -p "Choisissez le numéro du site à supprimer [0-$((num-1))] : " choice
+
+                if [ "$choice" = "0" ]; then
+                    echo -e "${YELLOW}Suppression annulée${NC}"
+                    continue
+                fi
+
+                if [ "$choice" -gt 0 ] && [ "$choice" -lt "$num" ]; then
+                    selected_site=${site_list[$choice]}
+                    site_name=${selected_site%.conf}
+
+                    echo -e "\n${RED}Attention! Vous allez supprimer le site : $selected_site${NC}"
+                    read -p "Êtes-vous sûr ? (o/n) : " confirm
+
+                    if [ "$confirm" = "o" ] || [ "$confirm" = "O" ]; then
+                        if [ -L "/etc/apache2/sites-enabled/$selected_site" ]; then
+                            sudo a2dissite "$selected_site"
+                        fi
+                        sudo rm "/etc/apache2/sites-available/$selected_site"
+                        sudo rm -rf "/var/www/$site_name"
+                        sudo systemctl restart apache2
+                        echo -e "${GREEN}Site supprimé avec succès${NC}"
+                    else
+                        echo -e "${YELLOW}Suppression annulée${NC}"
+                    fi
+                else
+                    echo -e "${RED}Numéro invalide${NC}"
+                fi
+                ;;
+            4) configure_https ;;
+            5) check_repair_site ;;
+            6) diagnose_ssl ;;
+            7) 
+                read -p "Entrez le nom de domaine à vérifier : " domain_to_check
+                check_dns "$domain_to_check"
+                ;;
+            8)
+                echo -e "\n${YELLOW}Configuration des hôtes virtuels Apache :${NC}"
+                apache2ctl -S
+                ;;
+            0) return ;;
+            *)
+                echo -e "${RED}Option invalide${NC}"
                 sleep 2
                 ;;
         esac
+        
+        if [ "$site_choice" != "0" ]; then
+            echo -e "\n${YELLOW}Appuyez sur Entrée pour continuer...${NC}"
+            read -r
+        fi
     done
 }
 
-# Menu de mise à jour du système
-system_update_menu() {
-    show_menu "Mise à jour du système" \
-        "Mettre à jour la liste des paquets" \
-        "Mettre à jour tous les paquets" \
-        "Mettre à jour et nettoyer le système" \
-        "Gérer les paquets installés" \
-        "back"
-    
-    choice=$(get_user_choice "Entrez votre choix" 4)
-    
-    case $choice in
-        1) 
-            log_info "Mise à jour de la liste des paquets..."
-            update_package_list
-            pause
-            ;;
-        2) 
-            log_info "Mise à jour des paquets..."
-            upgrade_packages
-            pause
-            ;;
-        3) 
-            log_info "Mise à jour complète du système..."
-            update_system
-            pause
-            ;;
-        4) 
-            log_info "Gestion des paquets installés..."
-            manage_packages
-            ;;
-        0) return ;;
-        *) 
-            show_error "Option invalide"
-            sleep 2
-            system_update_menu
-            ;;
-    esac
-}
-
-# Menu de gestion d'Apache
+# Menu principal d'Apache
 apache_menu() {
     while true; do
-        show_menu "Gestion d'Apache" \
-            "Installer Apache" \
-            "Démarrer Apache" \
-            "Arrêter Apache" \
-            "Redémarrer Apache" \
-            "Statut Apache" \
-            "Configuration Apache" \
-            "Gestion des modules" \
-            "back"
+        clear
+        show_bash_version
+        echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║${NC}        ${GREEN}Gestion d'Apache${NC}                   ${BLUE}║${NC}"
+        echo -e "${BLUE}╠════════════════════════════════════════════╣${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[1]${NC} Installer Apache                     ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[2]${NC} Démarrer Apache                     ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[3]${NC} Arrêter Apache                      ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[4]${NC} Redémarrer Apache                   ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[5]${NC} Statut Apache                       ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[6]${NC} Configuration Apache                 ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[7]${NC} Désactiver site par défaut          ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${RED}[0]${NC} Retour au menu principal            ${BLUE}║${NC}"
+        echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
         
-        choice=$(get_user_choice "Entrez votre choix" 7)
-        
-        case $choice in
-            1) 
-                log_info "Installation d'Apache..."
-                install_apache
-                pause
+        read -p "$(echo -e ${YELLOW}Entrez votre choix [0-7]${NC}: )" apache_choice
+
+        case $apache_choice in
+            1) install_apache ;;
+            2) start_apache ;;
+            3) stop_apache ;;
+            4) restart_apache ;;
+            5) status_apache ;;
+            6) configure_apache ;;
+            7)
+                echo -e "\n${YELLOW}Désactivation du site par défaut...${NC}"
+                if [ -f "/etc/apache2/sites-enabled/000-default.conf" ]; then
+                    sudo a2dissite 000-default.conf
+                    sudo systemctl restart apache2
+                    echo -e "${GREEN}✓ Site par défaut désactivé${NC}"
+                    echo -e "\n${YELLOW}Configuration des hôtes virtuels mise à jour :${NC}"
+                    apache2ctl -S
+                else
+                    echo -e "${GREEN}✓ Site par défaut déjà désactivé${NC}"
+                fi
                 ;;
-            2) 
-                log_info "Démarrage d'Apache..."
-                start_apache
-                pause
-                ;;
-            3) 
-                log_info "Arrêt d'Apache..."
-                stop_apache
-                pause
-                ;;
-            4) 
-                log_info "Redémarrage d'Apache..."
-                restart_apache
-                pause
-                ;;
-            5) 
-                log_info "Affichage du statut d'Apache..."
-                status_apache
-                pause
-                ;;
-            6) apache_config_menu ;;
-            7) apache_modules_menu ;;
             0) return ;;
-            *) 
-                show_error "Option invalide"
+            *)
+                echo -e "${RED}Option invalide, veuillez réessayer.${NC}"
                 sleep 2
                 ;;
         esac
-    done
-}
-
-# Menu de configuration d'Apache
-apache_config_menu() {
-    while true; do
-        show_menu "Configuration d'Apache" \
-            "Éditer configuration principale" \
-            "Vérifier la syntaxe" \
-            "Configurer le pare-feu" \
-            "Configurer les ports" \
-            "Optimiser les performances" \
-            "Sécuriser Apache" \
-            "back"
         
-        choice=$(get_user_choice "Entrez votre choix" 6)
-        
-        case $choice in
-            1) 
-                log_info "Édition de la configuration principale..."
-                edit_apache_config
-                pause
-                ;;
-            2) 
-                log_info "Vérification de la syntaxe..."
-                check_apache_config
-                pause
-                ;;
-            3) 
-                log_info "Configuration du pare-feu..."
-                configure_apache_firewall
-                pause
-                ;;
-            4) 
-                log_info "Configuration des ports..."
-                configure_apache_ports
-                pause
-                ;;
-            5) 
-                log_info "Optimisation des performances..."
-                optimize_apache
-                pause
-                ;;
-            6) 
-                log_info "Sécurisation d'Apache..."
-                secure_apache
-                pause
-                ;;
-            0) return ;;
-            *) 
-                show_error "Option invalide"
-                sleep 2
-                ;;
-        esac
-    done
-}
-
-# Menu de gestion des modules Apache
-apache_modules_menu() {
-    while true; do
-        show_menu "Gestion des modules Apache" \
-            "Lister les modules actifs" \
-            "Activer un module" \
-            "Désactiver un module" \
-            "back"
-        
-        choice=$(get_user_choice "Entrez votre choix" 3)
-        
-        case $choice in
-            1) 
-                log_info "Liste des modules actifs..."
-                list_apache_modules
-                pause
-                ;;
-            2) 
-                log_info "Activation d'un module..."
-                enable_apache_module
-                pause
-                ;;
-            3) 
-                log_info "Désactivation d'un module..."
-                disable_apache_module
-                pause
-                ;;
-            0) return ;;
-            *) 
-                show_error "Option invalide"
-                sleep 2
-                ;;
-        esac
-    done
-}
-
-# Menu de gestion des sites web
-sites_menu() {
-    while true; do
-        show_menu "Gestion des sites web" \
-            "Déployer un nouveau site" \
-            "Importer un site existant" \
-            "Liste des sites déployés" \
-            "Supprimer un site" \
-            "Configurer HTTPS (SSL)" \
-            "Vérifier/Réparer un site" \
-            "Diagnostic DNS" \
-            "back"
-        
-        choice=$(get_user_choice "Entrez votre choix" 7)
-        
-        case $choice in
-            1) 
-                log_info "Déploiement d'un nouveau site..."
-                deploy_site
-                pause
-                ;;
-            2) 
-                log_info "Importation d'un site existant..."
-                import_site
-                pause
-                ;;
-            3) 
-                log_info "Liste des sites déployés..."
-                list_sites
-                pause
-                ;;
-            4) 
-                log_info "Suppression d'un site..."
-                delete_site
-                pause
-                ;;
-            5) 
-                log_info "Configuration HTTPS (SSL)..."
-                manage_ssl
-                ;;
-            6) 
-                log_info "Vérification/Réparation d'un site..."
-                check_repair_site
-                pause
-                ;;
-            7) 
-                log_info "Diagnostic DNS..."
-                ssl_dns_menu 
-                ;;
-            0) return ;;
-            *) 
-                show_error "Option invalide"
-                sleep 2
-                ;;
-        esac
-    done
-}
-
-# Menu SSL/HTTPS
-ssl_menu() {
-    manage_ssl
-}
-
-# Menu de diagnostic DNS
-ssl_dns_menu() {
-    show_header "Diagnostic DNS"
-    
-    local domain=$(get_user_input "Entrez le nom de domaine à vérifier" "" true)
-    
-    if [ -z "$domain" ]; then
-        show_error "Nom de domaine non spécifié"
-        return 1
-    fi
-    
-    # Vérifier si l'outil host est installé
-    if ! command_exists host; then
-        show_warning "L'outil DNS 'host' n'est pas installé"
-        if confirm_action "Voulez-vous installer dnsutils maintenant?"; then
-            apt update && apt install -y dnsutils
-            show_success "dnsutils installé avec succès"
-        else
-            show_error "dnsutils est nécessaire pour vérifier les DNS"
-            return 1
+        if [ "$apache_choice" != "0" ]; then
+            echo -e "\n${YELLOW}Appuyez sur Entrée pour retourner au menu Apache...${NC}"
+            read -r
         fi
-    fi
-    
-    check_dns "$domain"
-    pause
-}
-
-# Menu de gestion de PHP
-php_menu() {
-    manage_php
-}
-
-# Menu de gestion des bases de données
-database_menu() {
-    manage_db
-}
-
-# Menu de sécurité et configuration
-security_menu() {
-    while true; do
-        show_menu "Configuration et sécurité" \
-            "Configurer SSH" \
-            "Configurer le pare-feu (UFW)" \
-            "Mettre à jour les règles de sécurité" \
-            "Analyser les journaux" \
-            "Configurer les sauvegardes" \
-            "back"
-        
-        choice=$(get_user_choice "Entrez votre choix" 5)
-        
-        case $choice in
-            1) 
-                log_info "Configuration SSH..."
-                configure_ssh_menu
-                ;;
-            2) 
-                log_info "Configuration du pare-feu..."
-                configure_firewall_menu
-                ;;
-            3) 
-                log_info "Mise à jour des règles de sécurité..."
-                update_security
-                pause
-                ;;
-            4) 
-                log_info "Analyse des journaux..."
-                analyze_logs
-                pause
-                ;;
-            5) 
-                log_info "Configuration des sauvegardes..."
-                configure_backups
-                pause
-                ;;
-            0) return ;;
-            *) 
-                show_error "Option invalide"
-                sleep 2
-                ;;
-        esac
     done
 }
 
-# Fonction pour exécuter les menus supplémentaires au besoin
-run_menu() {
-    local menu_name="$1"
-    local menu_function="show_${menu_name}_menu"
-    
-    # Vérifier si la fonction de menu existe
-    if declare -f "$menu_function" > /dev/null; then
-        "$menu_function"
-    else
-        show_error "Menu $menu_name non trouvé"
-        sleep 2
-    fi
+# Fonction pour afficher le menu et gérer la sélection
+show_menu() {
+    while true; do
+        clear
+        show_bash_version
+        echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║${NC}     ${GREEN}Gestion de la VM DigitalOcean${NC}         ${BLUE}║${NC}"
+        echo -e "${BLUE}╠════════════════════════════════════════════╣${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[1]${NC} Mise à jour de linux                ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[2]${NC} Installation Apache                  ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[3]${NC} Gestion des sites web               ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[4]${NC} Informations système                ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${YELLOW}[5]${NC} Coucou mon ami Skandysan           ${BLUE}║${NC}"
+        echo -e "${BLUE}║${NC}  ${RED}[0]${NC} Quitter                              ${BLUE}║${NC}"
+        echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
+        echo -e "\n${GREEN}Serveur${NC}: $(hostname) | ${GREEN}IP${NC}: $(hostname -I | cut -d' ' -f1)"
+        echo -e "${GREEN}Date${NC}: $(date '+%Y-%m-%d %H:%M:%S')\n"
+        
+        read -p "$(echo -e ${YELLOW}Entrez votre choix [0-5]${NC}: )" choice
+
+        case $choice in
+            1) update_linux ;;
+            2) apache_menu ;;
+            3) manage_sites ;;
+            4) echo "Option 4 sélectionnée" ;;
+            5) echo "Option 5 sélectionnée" ;;
+            0)
+                clear
+                echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
+                echo -e "${GREEN}║${NC}      Merci d'avoir utilisé ce script!      ${GREEN}║${NC}"
+                echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Option invalide, veuillez réessayer.${NC}"
+                sleep 2
+                ;;
+        esac
+        
+        if [ "$choice" != "0" ]; then
+            echo -e "\n${YELLOW}Appuyez sur Entrée pour retourner au menu...${NC}"
+            read -r
+        fi
+    done
 } 

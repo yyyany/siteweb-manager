@@ -20,4 +20,4 @@ source "$BASE_DIR/lib/ssl.sh"
 source "$BASE_DIR/ui/menus.sh"
 
 # Lancement du menu principal
-show_menu
+show_menu 
