@@ -155,34 +155,79 @@ remove_site() {
     
     # Validation du domaine
     if [[ -z "$domain" ]]; then
-        log_error "Nom de domaine manquant"
+        show_error "Nom de domaine manquant"
+        echo -e "${CYAN}Appuyez sur Entrée pour continuer...${NC}"
+        read -p ""
         return 1
     fi
     
-    log_info "Suppression du site $domain..."
+    show_info "Suppression du site $domain..."
+    
+    local status_ok=true
     
     # Désactivation du site
     if [[ -f "$APACHE_ENABLED/$domain.conf" ]]; then
-        log_info "Désactivation du site..."
-        a2dissite "$domain.conf"
+        show_info "Désactivation du site..."
+        if a2dissite "$domain.conf"; then
+            show_success "Site désactivé avec succès"
+        else
+            show_error "Erreur lors de la désactivation du site"
+            status_ok=false
+        fi
+    else
+        show_warning "Le site n'était pas activé dans Apache"
     fi
     
     # Suppression de la configuration
     if [[ -f "$APACHE_AVAILABLE/$domain.conf" ]]; then
-        log_info "Suppression de la configuration..."
-        rm "$APACHE_AVAILABLE/$domain.conf"
+        show_info "Suppression de la configuration..."
+        if rm "$APACHE_AVAILABLE/$domain.conf"; then
+            show_success "Configuration supprimée avec succès"
+        else
+            show_error "Erreur lors de la suppression de la configuration"
+            status_ok=false
+        fi
+    else
+        show_warning "Aucun fichier de configuration trouvé pour ce domaine"
     fi
     
     # Suppression des fichiers du site
     if [[ -d "$WWW_DIR/$domain" ]]; then
-        log_info "Suppression des fichiers..."
-        rm -rf "$WWW_DIR/$domain"
+        show_info "Suppression des fichiers du site..."
+        local file_count=$(find "$WWW_DIR/$domain" -type f | wc -l)
+        show_warning "Suppression de $file_count fichiers du répertoire $WWW_DIR/$domain"
+        
+        if rm -rf "$WWW_DIR/$domain"; then
+            show_success "Fichiers supprimés avec succès"
+        else
+            show_error "Erreur lors de la suppression des fichiers"
+            status_ok=false
+        fi
+    else
+        show_warning "Aucun répertoire de site trouvé pour ce domaine"
     fi
     
     # Redémarrage d'Apache
-    systemctl restart apache2
+    show_info "Redémarrage d'Apache..."
+    if systemctl restart apache2; then
+        show_success "Apache redémarré avec succès"
+    else
+        show_error "Erreur lors du redémarrage d'Apache"
+        status_ok=false
+    fi
     
-    log_info "Site $domain supprimé avec succès"
+    # Résumé
+    echo
+    if [[ "$status_ok" == true ]]; then
+        show_success "Site $domain supprimé avec succès"
+    else
+        show_warning "La suppression du site $domain a rencontré des problèmes"
+        echo -e "${YELLOW}Vérifiez les messages d'erreur ci-dessus et consultez les logs pour plus de détails${NC}"
+    fi
+    
+    echo -e "${CYAN}Appuyez sur Entrée pour continuer...${NC}"
+    read -p ""
+    
     return 0
 }
 
@@ -326,27 +371,135 @@ repair_site() {
     
     # Validation du domaine
     if [[ -z "$domain" ]]; then
-        log_error "Nom de domaine manquant"
+        show_error "Nom de domaine manquant"
+        echo -e "${CYAN}Appuyez sur Entrée pour continuer...${NC}"
+        read -p ""
         return 1
     fi
     
-    log_info "Réparation du site $domain..."
+    show_info "Réparation du site $domain..."
+    echo
+    
+    local status_ok=true
+    local actions_done=0
+    
+    echo -e "${BLUE}=== Réparation du site $domain ===${NC}"
     
     # Vérification du répertoire
+    echo -e "${YELLOW}Étape 1: Vérification du répertoire${NC}"
     if [[ ! -d "$WWW_DIR/$domain" ]]; then
-        log_info "Création du répertoire du site..."
-        mkdir -p "$WWW_DIR/$domain"
+        show_warning "Le répertoire du site n'existe pas, création en cours..."
+        if mkdir -p "$WWW_DIR/$domain"; then
+            show_success "Répertoire $WWW_DIR/$domain créé avec succès"
+            ((actions_done++))
+        else
+            show_error "Impossible de créer le répertoire du site"
+            status_ok=false
+        fi
+    else
+        show_success "Le répertoire du site existe déjà"
     fi
     
+    echo
+    
+    # Création d'un fichier index par défaut si le répertoire est vide
+    if [[ -d "$WWW_DIR/$domain" ]]; then
+        local file_count=$(find "$WWW_DIR/$domain" -type f | wc -l)
+        
+        if [[ $file_count -eq 0 ]]; then
+            show_warning "Le répertoire du site est vide, création d'un fichier index par défaut..."
+            
+            cat > "$WWW_DIR/$domain/index.html" << EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$domain - Site Web</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #2c3e50;
+        }
+        footer {
+            margin-top: 30px;
+            font-size: 0.8em;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Bienvenue sur $domain</h1>
+        <p>Ce site est en cours de construction.</p>
+        <p>Cette page a été générée automatiquement par SiteWeb Manager.</p>
+    </div>
+    <footer>
+        <p>Géré par SiteWeb Manager - $(date +"%d/%m/%Y")</p>
+    </footer>
+</body>
+</html>
+EOF
+            
+            show_success "Fichier index.html créé avec succès"
+            ((actions_done++))
+        else
+            show_success "Le répertoire contient déjà des fichiers ($file_count fichiers trouvés)"
+        fi
+    fi
+    
+    echo
+    
     # Correction des permissions
-    log_info "Correction des permissions..."
-    chown -R "$DEFAULT_OWNER" "$WWW_DIR/$domain"
-    find "$WWW_DIR/$domain" -type d -exec chmod "$DEFAULT_PERMISSIONS" {} \;
-    find "$WWW_DIR/$domain" -type f -exec chmod 644 {} \;
+    echo -e "${YELLOW}Étape 2: Correction des permissions${NC}"
+    show_info "Modification des propriétaires et des permissions..."
+    
+    if chown -R "$DEFAULT_OWNER" "$WWW_DIR/$domain"; then
+        show_success "Propriétaire modifié avec succès"
+        ((actions_done++))
+    else
+        show_error "Échec de la modification du propriétaire"
+        status_ok=false
+    fi
+    
+    if find "$WWW_DIR/$domain" -type d -exec chmod "$DEFAULT_PERMISSIONS" {} \; ; then
+        show_success "Permissions des répertoires modifiées avec succès"
+        ((actions_done++))
+    else
+        show_error "Échec de la modification des permissions des répertoires"
+        status_ok=false
+    fi
+    
+    if find "$WWW_DIR/$domain" -type f -exec chmod 644 {} \; ; then
+        show_success "Permissions des fichiers modifiées avec succès"
+        ((actions_done++))
+    else
+        show_error "Échec de la modification des permissions des fichiers"
+        status_ok=false
+    fi
+    
+    echo
     
     # Vérification de la configuration
+    echo -e "${YELLOW}Étape 3: Configuration Apache${NC}"
     if [[ ! -f "$APACHE_AVAILABLE/$domain.conf" ]]; then
-        log_info "Création de la configuration Apache..."
+        show_warning "Le fichier de configuration Apache n'existe pas, création en cours..."
+        
         cat > "$APACHE_AVAILABLE/$domain.conf" << EOF
 <VirtualHost *:80>
     ServerName $domain
@@ -363,17 +516,208 @@ repair_site() {
     CustomLog \${APACHE_LOG_DIR}/$domain-access.log combined
 </VirtualHost>
 EOF
+        
+        show_success "Configuration Apache créée avec succès"
+        ((actions_done++))
+    else
+        show_success "Le fichier de configuration Apache existe déjà"
     fi
+    
+    echo
     
     # Activation du site
+    echo -e "${YELLOW}Étape 4: Activation du site${NC}"
     if [[ ! -f "$APACHE_ENABLED/$domain.conf" ]]; then
-        log_info "Activation du site..."
-        a2ensite "$domain.conf"
+        show_warning "Le site n'est pas activé, activation en cours..."
+        if a2ensite "$domain.conf"; then
+            show_success "Site activé avec succès"
+            ((actions_done++))
+        else
+            show_error "Échec de l'activation du site"
+            status_ok=false
+        fi
+    else
+        show_success "Le site est déjà activé"
     fi
     
-    # Redémarrage d'Apache
-    systemctl restart apache2
+    echo
     
-    log_info "Site $domain réparé avec succès"
+    # Redémarrage d'Apache
+    echo -e "${YELLOW}Étape 5: Redémarrage d'Apache${NC}"
+    show_info "Redémarrage du service Apache..."
+    if systemctl restart apache2; then
+        show_success "Apache redémarré avec succès"
+        ((actions_done++))
+    else
+        show_error "Échec du redémarrage d'Apache"
+        status_ok=false
+    fi
+    
+    echo
+    
+    # Résumé
+    echo -e "${BLUE}=== Résumé de la réparation ===${NC}"
+    if [[ "$status_ok" == true ]]; then
+        if [[ $actions_done -gt 0 ]]; then
+            show_success "Site $domain réparé avec succès ($actions_done actions effectuées)"
+        else
+            show_success "Aucune réparation nécessaire, le site $domain semble fonctionnel"
+        fi
+        
+        echo -e "${YELLOW}URL du site:${NC} http://$domain"
+        echo -e "${YELLOW}Répertoire:${NC} $WWW_DIR/$domain"
+        echo -e "${YELLOW}Configuration:${NC} $APACHE_AVAILABLE/$domain.conf"
+    else
+        show_warning "La réparation du site $domain a rencontré des problèmes"
+        echo -e "${YELLOW}Vérifiez les messages d'erreur ci-dessus et consultez les logs pour plus de détails${NC}"
+    fi
+    
+    echo -e "\n${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+    read -p ""
+    
     return 0
+}
+
+# Fonction pour scanner le système à la recherche de sites potentiels
+scan_potential_sites() {
+    local search_dir=$1
+    local deployment_mode=$2
+    
+    # Validation du répertoire de recherche
+    if [[ -z "$search_dir" ]]; then
+        search_dir="/home"
+    fi
+    
+    show_info "Recherche de sites potentiels dans $search_dir..."
+    echo
+    
+    echo -e "${BLUE}=== Sites potentiels ===${NC}"
+    echo -e "${YELLOW}Recherche de dossiers contenant des fichiers index.html ou index.php...${NC}"
+    echo -e "${CYAN}Cela peut prendre un moment selon le nombre de fichiers...${NC}"
+    echo
+    
+    # Tableau pour stocker les résultats
+    declare -a potential_sites
+    local count=0
+    
+    # Recherche des dossiers contenant index.html
+    echo -e "${YELLOW}Recherche des fichiers index.html...${NC}"
+    while IFS= read -r file; do
+        local dir=$(dirname "$file")
+        potential_sites+=("$dir")
+        ((count++))
+    done < <(find "$search_dir" -name "index.html" -type f 2>/dev/null)
+    
+    # Recherche des dossiers contenant index.php
+    echo -e "${YELLOW}Recherche des fichiers index.php...${NC}"
+    while IFS= read -r file; do
+        local dir=$(dirname "$file")
+        # Vérifier si ce dossier n'est pas déjà dans la liste (avec index.html)
+        if ! echo "${potential_sites[@]}" | grep -q "$dir"; then
+            potential_sites+=("$dir")
+            ((count++))
+        fi
+    done < <(find "$search_dir" -name "index.php" -type f 2>/dev/null)
+    
+    # Afficher les résultats
+    if [[ $count -eq 0 ]]; then
+        echo -e "${YELLOW}Aucun site potentiel trouvé.${NC}"
+        echo
+        echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+        read -p ""
+        return 1
+    else
+        echo -e "${GREEN}$count sites potentiels trouvés :${NC}"
+        echo
+        
+        # Afficher les résultats numérotés
+        for ((i=0; i<${#potential_sites[@]}; i++)); do
+            echo -e "${GREEN}$((i+1)).${NC} ${potential_sites[$i]}"
+        done
+        
+        echo
+        
+        if [[ "$deployment_mode" == "select" ]]; then
+            echo -e "${YELLOW}Sélectionnez un site par son numéro (1-$count) ou 0 pour annuler :${NC}"
+            local choice
+            read -p "Votre choix : " choice
+            
+            if [[ "$choice" =~ ^[0-9]+$ ]]; then
+                if [[ "$choice" -ge 1 && "$choice" -le $count ]]; then
+                    # Retourner le chemin du site sélectionné
+                    echo "${potential_sites[$((choice-1))]}"
+                    return 0
+                elif [[ "$choice" -eq 0 ]]; then
+                    echo "cancel"
+                    return 2
+                else
+                    show_error "Choix invalide."
+                    echo
+                    echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+                    read -p ""
+                    return 1
+                fi
+            else
+                show_error "Veuillez entrer un nombre."
+                echo
+                echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+                read -p ""
+                return 1
+            fi
+        else
+            echo -e "${CYAN}Pour déployer un de ces sites, notez son numéro pour le sélectionner ultérieurement.${NC}"
+            echo
+            echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+            read -p ""
+            return 0
+        fi
+    fi
+}
+
+# Fonction pour obtenir la liste des sites déployés avec sélection
+list_deployed_sites_with_selection() {
+    echo -e "${BLUE}=== Sites déployés ===${NC}"
+    
+    # Tableau pour stocker les sites déployés
+    declare -a deployed_sites
+    local count=0
+    
+    # Lister les sites déployés
+    while IFS= read -r site; do
+        if [[ "$site" != "html" ]]; then
+            deployed_sites+=("$site")
+            echo -e "${GREEN}$((count+1)).${NC} $site"
+            ((count++))
+        fi
+    done < <(ls -1 "$WWW_DIR" 2>/dev/null)
+    
+    if [[ $count -eq 0 ]]; then
+        echo -e "${YELLOW}Aucun site déployé.${NC}"
+        echo
+        echo -e "${CYAN}Appuyez sur Entrée pour revenir au menu...${NC}"
+        read -p ""
+        return 1
+    fi
+    
+    echo
+    echo -e "${YELLOW}Sélectionnez un site par son numéro (1-$count) ou 0 pour annuler :${NC}"
+    local choice
+    read -p "Votre choix : " choice
+    
+    if [[ "$choice" =~ ^[0-9]+$ ]]; then
+        if [[ "$choice" -ge 1 && "$choice" -le $count ]]; then
+            # Retourner le nom du site sélectionné
+            echo "${deployed_sites[$((choice-1))]}"
+            return 0
+        elif [[ "$choice" -eq 0 ]]; then
+            echo "cancel"
+            return 2
+        else
+            show_error "Choix invalide."
+            return 1
+        fi
+    else
+        show_error "Veuillez entrer un nombre."
+        return 1
+    fi
 } 

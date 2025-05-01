@@ -39,6 +39,7 @@ show_sites_menu() {
         
         local options=(
             "Déployer un site"
+            "Rechercher des sites potentiels"
             "Lister les sites"
             "Supprimer un site"
             "Vérifier un site"
@@ -54,31 +55,68 @@ show_sites_menu() {
                 show_header
                 echo -e "${BLUE}=== Déploiement d'un site web ===${NC}"
                 echo
-                echo -e "${CYAN}Cette fonction vous permet de déployer un site web sur votre serveur.${NC}"
-                echo -e "${CYAN}Vous devez spécifier :${NC}"
-                echo -e "  ${YELLOW}1. Le chemin du répertoire source${NC} - où se trouvent vos fichiers HTML/CSS/JS"
-                echo -e "  ${YELLOW}2. Le nom de domaine${NC} - exemple: monsite.com"
+                echo -e "${CYAN}Comment souhaitez-vous sélectionner le site à déployer ?${NC}"
+                echo -e "${GREEN}1.${NC} Rechercher des sites potentiels (recommandé)"
+                echo -e "${GREEN}2.${NC} Saisir le chemin manuellement"
                 echo
-                echo -e "${CYAN}Conseils :${NC}"
-                echo -e "  - Le répertoire source doit exister et contenir vos fichiers web"
-                echo -e "  - Le nom de domaine doit être valide (format: exemple.com)"
-                echo -e "  - Assurez-vous que votre DNS est configuré pour pointer vers ce serveur"
-                echo
-
-                read -p "Chemin du répertoire source (ex: /home/utilisateur/mon-site) : " source_dir
-                if [[ -z "$source_dir" ]]; then
-                    show_error "Le chemin du répertoire source ne peut pas être vide"
-                    read -p "Appuyez sur Entrée pour continuer..."
-                    continue
-                fi
                 
-                if [[ ! -d "$source_dir" ]]; then
-                    show_error "Le répertoire '$source_dir' n'existe pas"
-                    echo -e "${YELLOW}Conseil: Utilisez un chemin absolu et vérifiez que le répertoire existe${NC}"
-                    read -p "Appuyez sur Entrée pour continuer..."
-                    continue
-                fi
-
+                local select_method
+                read -p "Votre choix (1-2) : " select_method
+                
+                case $select_method in
+                    1)
+                        show_header
+                        echo -e "${BLUE}=== Recherche de sites potentiels pour déploiement ===${NC}"
+                        echo
+                        read -p "Répertoire de départ pour la recherche [/home] : " search_dir
+                        
+                        # Utiliser /home par défaut si aucun répertoire n'est spécifié
+                        if [[ -z "$search_dir" ]]; then
+                            search_dir="/home"
+                        fi
+                        
+                        # Vérifier si le répertoire existe
+                        if [[ ! -d "$search_dir" ]]; then
+                            show_error "Le répertoire '$search_dir' n'existe pas"
+                            read -p "Appuyez sur Entrée pour continuer..."
+                            continue
+                        fi
+                        
+                        # Sélectionner un site par son numéro
+                        source_dir=$(scan_potential_sites "$search_dir" "select")
+                        
+                        # Vérifier le résultat de la sélection
+                        if [[ "$source_dir" == "cancel" ]]; then
+                            show_info "Déploiement annulé"
+                            read -p "Appuyez sur Entrée pour continuer..."
+                            continue
+                        elif [[ -z "$source_dir" ]]; then
+                            continue
+                        fi
+                        ;;
+                    2)
+                        read -p "Chemin du répertoire source (ex: /home/utilisateur/mon-site) : " source_dir
+                        if [[ -z "$source_dir" ]]; then
+                            show_error "Le chemin du répertoire source ne peut pas être vide"
+                            read -p "Appuyez sur Entrée pour continuer..."
+                            continue
+                        fi
+                        
+                        if [[ ! -d "$source_dir" ]]; then
+                            show_error "Le répertoire '$source_dir' n'existe pas"
+                            echo -e "${YELLOW}Conseil: Utilisez un chemin absolu et vérifiez que le répertoire existe${NC}"
+                            read -p "Appuyez sur Entrée pour continuer..."
+                            continue
+                        fi
+                        ;;
+                    *)
+                        show_error "Choix invalide"
+                        read -p "Appuyez sur Entrée pour continuer..."
+                        continue
+                        ;;
+                esac
+                
+                echo -e "${BLUE}=== Nom de domaine ===${NC}"
                 read -p "Nom de domaine (ex: exemple.com) : " domain
                 if [[ -z "$domain" ]]; then
                     show_error "Le nom de domaine ne peut pas être vide"
@@ -101,8 +139,32 @@ show_sites_menu() {
                     read -p "Appuyez sur Entrée pour continuer..."
                 fi
                 ;;
-            2) list_sites;;
-            3)
+            2)
+                show_header
+                echo -e "${BLUE}=== Recherche de sites potentiels ===${NC}"
+                echo
+                echo -e "${CYAN}Cette fonction recherche des dossiers qui pourraient contenir des sites web.${NC}"
+                echo -e "${CYAN}Elle va scanner les dossiers pour trouver des fichiers index.html ou index.php.${NC}"
+                echo
+                
+                read -p "Répertoire de départ pour la recherche [/home] : " search_dir
+                
+                # Utiliser /home par défaut si aucun répertoire n'est spécifié
+                if [[ -z "$search_dir" ]]; then
+                    search_dir="/home"
+                fi
+                
+                # Vérifier si le répertoire existe
+                if [[ ! -d "$search_dir" ]]; then
+                    show_error "Le répertoire '$search_dir' n'existe pas"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+                
+                scan_potential_sites "$search_dir"
+                ;;
+            3) list_sites;;
+            4)
                 show_header
                 echo -e "${BLUE}=== Suppression d'un site web ===${NC}"
                 echo
@@ -110,15 +172,15 @@ show_sites_menu() {
                 echo -e "${CYAN}Attention: Cette action est irréversible!${NC}"
                 echo
                 
-                # Afficher les sites disponibles
-                echo -e "${YELLOW}Sites disponibles :${NC}"
-                ls -1 "$APACHE_AVAILABLE" | grep -v "000-default.conf" | sed 's/\.conf$//' || echo "Aucun site disponible"
-                echo
+                # Sélectionner un site par son numéro
+                domain=$(list_deployed_sites_with_selection)
                 
-                read -p "Nom de domaine à supprimer : " domain
-                
-                if [[ -z "$domain" ]]; then
-                    show_error "Le nom de domaine ne peut pas être vide"
+                # Vérifier le résultat de la sélection
+                if [[ "$domain" == "cancel" ]]; then
+                    show_info "Suppression annulée"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                elif [[ -z "$domain" ]]; then
                     read -p "Appuyez sur Entrée pour continuer..."
                     continue
                 fi
@@ -132,22 +194,22 @@ show_sites_menu() {
                 remove_site "$domain"
                 read -p "Appuyez sur Entrée pour continuer..."
                 ;;
-            4)
+            5)
                 show_header
                 echo -e "${BLUE}=== Vérification d'un site web ===${NC}"
                 echo
                 echo -e "${CYAN}Cette fonction vérifie l'état d'un site web déployé.${NC}"
                 echo
                 
-                # Afficher les sites disponibles
-                echo -e "${YELLOW}Sites disponibles :${NC}"
-                ls -1 "$APACHE_AVAILABLE" | grep -v "000-default.conf" | sed 's/\.conf$//' || echo "Aucun site disponible"
-                echo
+                # Sélectionner un site par son numéro
+                domain=$(list_deployed_sites_with_selection)
                 
-                read -p "Nom de domaine à vérifier : " domain
-                
-                if [[ -z "$domain" ]]; then
-                    show_error "Le nom de domaine ne peut pas être vide"
+                # Vérifier le résultat de la sélection
+                if [[ "$domain" == "cancel" ]]; then
+                    show_info "Vérification annulée"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                elif [[ -z "$domain" ]]; then
                     read -p "Appuyez sur Entrée pour continuer..."
                     continue
                 fi
@@ -155,7 +217,7 @@ show_sites_menu() {
                 check_site "$domain"
                 read -p "Appuyez sur Entrée pour continuer..."
                 ;;
-            5)
+            6)
                 show_header
                 echo -e "${BLUE}=== Réparation d'un site web ===${NC}"
                 echo
@@ -163,15 +225,15 @@ show_sites_menu() {
                 echo -e "${CYAN}Elle reconfigure les permissions, réactive le site et redémarre Apache.${NC}"
                 echo
                 
-                # Afficher les sites disponibles
-                echo -e "${YELLOW}Sites disponibles :${NC}"
-                ls -1 "$WWW_DIR" | grep -v "html" || echo "Aucun site déployé"
-                echo
+                # Sélectionner un site par son numéro
+                domain=$(list_deployed_sites_with_selection)
                 
-                read -p "Nom de domaine à réparer : " domain
-                
-                if [[ -z "$domain" ]]; then
-                    show_error "Le nom de domaine ne peut pas être vide"
+                # Vérifier le résultat de la sélection
+                if [[ "$domain" == "cancel" ]]; then
+                    show_info "Réparation annulée"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                elif [[ -z "$domain" ]]; then
                     read -p "Appuyez sur Entrée pour continuer..."
                     continue
                 fi
