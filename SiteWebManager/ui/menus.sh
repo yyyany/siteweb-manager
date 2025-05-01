@@ -51,25 +51,139 @@ show_sites_menu() {
         
         case $choice in
             1)
-                read -p "Chemin du site à déployer : " source_dir
-                read -p "Nom de domaine : " domain
-                deploy_site "$source_dir" "$domain"
+                show_header
+                echo -e "${BLUE}=== Déploiement d'un site web ===${NC}"
+                echo
+                echo -e "${CYAN}Cette fonction vous permet de déployer un site web sur votre serveur.${NC}"
+                echo -e "${CYAN}Vous devez spécifier :${NC}"
+                echo -e "  ${YELLOW}1. Le chemin du répertoire source${NC} - où se trouvent vos fichiers HTML/CSS/JS"
+                echo -e "  ${YELLOW}2. Le nom de domaine${NC} - exemple: monsite.com"
+                echo
+                echo -e "${CYAN}Conseils :${NC}"
+                echo -e "  - Le répertoire source doit exister et contenir vos fichiers web"
+                echo -e "  - Le nom de domaine doit être valide (format: exemple.com)"
+                echo -e "  - Assurez-vous que votre DNS est configuré pour pointer vers ce serveur"
+                echo
+
+                read -p "Chemin du répertoire source (ex: /home/utilisateur/mon-site) : " source_dir
+                if [[ -z "$source_dir" ]]; then
+                    show_error "Le chemin du répertoire source ne peut pas être vide"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+                
+                if [[ ! -d "$source_dir" ]]; then
+                    show_error "Le répertoire '$source_dir' n'existe pas"
+                    echo -e "${YELLOW}Conseil: Utilisez un chemin absolu et vérifiez que le répertoire existe${NC}"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+
+                read -p "Nom de domaine (ex: exemple.com) : " domain
+                if [[ -z "$domain" ]]; then
+                    show_error "Le nom de domaine ne peut pas être vide"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+                
+                # Confirmation avec récapitulatif
+                echo
+                echo -e "${BLUE}=== Récapitulatif ===${NC}"
+                echo -e "${YELLOW}Répertoire source :${NC} $source_dir"
+                echo -e "${YELLOW}Nom de domaine :${NC} $domain"
+                echo -e "${YELLOW}Destination :${NC} $WWW_DIR/$domain"
+                echo
+                
+                if show_confirm "Voulez-vous déployer ce site?" "y"; then
+                    deploy_site "$source_dir" "$domain"
+                else
+                    show_info "Déploiement annulé"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                fi
                 ;;
             2) list_sites;;
             3)
+                show_header
+                echo -e "${BLUE}=== Suppression d'un site web ===${NC}"
+                echo
+                echo -e "${CYAN}Cette fonction permet de supprimer un site web et sa configuration.${NC}"
+                echo -e "${CYAN}Attention: Cette action est irréversible!${NC}"
+                echo
+                
+                # Afficher les sites disponibles
+                echo -e "${YELLOW}Sites disponibles :${NC}"
+                ls -1 "$APACHE_AVAILABLE" | grep -v "000-default.conf" | sed 's/\.conf$//' || echo "Aucun site disponible"
+                echo
+                
                 read -p "Nom de domaine à supprimer : " domain
+                
+                if [[ -z "$domain" ]]; then
+                    show_error "Le nom de domaine ne peut pas être vide"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+                
+                if ! show_confirm "Êtes-vous sûr de vouloir supprimer le site $domain?" "n"; then
+                    show_info "Suppression annulée"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+                
                 remove_site "$domain"
+                read -p "Appuyez sur Entrée pour continuer..."
                 ;;
             4)
+                show_header
+                echo -e "${BLUE}=== Vérification d'un site web ===${NC}"
+                echo
+                echo -e "${CYAN}Cette fonction vérifie l'état d'un site web déployé.${NC}"
+                echo
+                
+                # Afficher les sites disponibles
+                echo -e "${YELLOW}Sites disponibles :${NC}"
+                ls -1 "$APACHE_AVAILABLE" | grep -v "000-default.conf" | sed 's/\.conf$//' || echo "Aucun site disponible"
+                echo
+                
                 read -p "Nom de domaine à vérifier : " domain
+                
+                if [[ -z "$domain" ]]; then
+                    show_error "Le nom de domaine ne peut pas être vide"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+                
                 check_site "$domain"
+                read -p "Appuyez sur Entrée pour continuer..."
                 ;;
             5)
+                show_header
+                echo -e "${BLUE}=== Réparation d'un site web ===${NC}"
+                echo
+                echo -e "${CYAN}Cette fonction tente de réparer un site web qui ne fonctionne pas correctement.${NC}"
+                echo -e "${CYAN}Elle reconfigure les permissions, réactive le site et redémarre Apache.${NC}"
+                echo
+                
+                # Afficher les sites disponibles
+                echo -e "${YELLOW}Sites disponibles :${NC}"
+                ls -1 "$WWW_DIR" | grep -v "html" || echo "Aucun site déployé"
+                echo
+                
                 read -p "Nom de domaine à réparer : " domain
+                
+                if [[ -z "$domain" ]]; then
+                    show_error "Le nom de domaine ne peut pas être vide"
+                    read -p "Appuyez sur Entrée pour continuer..."
+                    continue
+                fi
+                
                 repair_site "$domain"
+                read -p "Appuyez sur Entrée pour continuer..."
                 ;;
             0) break;;
-            *) show_error "Choix invalide";;
+            *) 
+                show_error "Choix invalide"
+                read -p "Appuyez sur Entrée pour continuer..."
+                ;;
         esac
     done
 }
