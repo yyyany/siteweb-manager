@@ -56,11 +56,41 @@ install_certbot() {
         fi
     fi
     
+    # Demander l'adresse email pour Let's Encrypt avant l'installation
+    local email_arg=""
+    if confirm_action "Souhaitez-vous configurer une adresse email pour les notifications Let's Encrypt?"; then
+        local email=""
+        while true; do
+            email=$(get_user_input "Entrez votre adresse email pour Let's Encrypt" "" true)
+            if [[ "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+                # Email valide
+                email_arg="--email $email"
+                break
+            else
+                show_error "Format d'adresse email invalide. Veuillez réessayer."
+            fi
+        done
+    else
+        show_warning "Sans adresse email, vous ne recevrez pas de notifications d'expiration"
+        if confirm_action "Continuer sans adresse email?"; then
+            email_arg="--register-unsafely-without-email"
+        else
+            return 1
+        fi
+    fi
+    
     # Installation de Certbot et du plugin Apache
     show_info "Installation de Certbot et du plugin Apache..."
     
     if apt update && apt install -y certbot python3-certbot-apache; then
         show_success "Certbot et le plugin Apache installés avec succès"
+        
+        # Configurer automatiquement l'email et accepter les conditions
+        if certbot register $email_arg --agree-tos --no-interactive; then
+            show_success "Configuration de Certbot réussie"
+        else
+            show_warning "La configuration automatique de Certbot a échoué"
+        fi
         
         # Activer le module SSL d'Apache si nécessaire
         a2enmod ssl >/dev/null 2>&1
@@ -121,6 +151,25 @@ add_ssl_to_site() {
         fi
     fi
     
+    # Demander l'adresse email pour Let's Encrypt avant tout
+    local email=""
+    while true; do
+        email=$(get_user_input "Entrez votre adresse email pour Let's Encrypt (pour les notifications d'expiration)" "" true)
+        if [ -z "$email" ]; then
+            show_warning "Une adresse email est fortement recommandée pour les notifications d'expiration et de sécurité"
+            if confirm_action "Voulez-vous continuer sans adresse email?"; then
+                email="--register-unsafely-without-email"
+                break
+            fi
+        elif [[ "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+            # Format d'email valide
+            email="--email $email"
+            break
+        else
+            show_error "Format d'adresse email invalide. Veuillez réessayer."
+        fi
+    done
+    
     # Lister les sites disponibles en utilisant la fonction depuis sites.sh
     list_available_sites "Sélectionnez un site pour ajouter SSL"
     
@@ -160,8 +209,8 @@ add_ssl_to_site() {
         add_domains="www.$domain"
     fi
     
-    # Construction de la commande Certbot
-    local certbot_cmd="certbot --apache -d $domain"
+    # Construction de la commande Certbot avec l'email
+    local certbot_cmd="certbot --apache $email -d $domain"
     
     # Ajouter les domaines supplémentaires
     for add_domain in $add_domains; do
@@ -184,7 +233,7 @@ add_ssl_to_site() {
     {
         sleep 2
         echo "$redirect"
-    } | $certbot_cmd
+    } | $certbot_cmd --no-interactive
     
     # Vérifier le résultat
     if [ $? -eq 0 ]; then
@@ -597,38 +646,65 @@ configure_https() {
         fi
     fi
     
-    # Au lieu de dupliquer le code, on utilise add_ssl_to_site
-    # mais on doit simuler le choix du site dans le menu
-    # Pour cela, on trouve l'index du site dans la liste
-    
-    # Obtenir la liste des sites activés
-    local sites_list=()
-    local site_index=0
-    local i=1
-    
-    for site_conf in $(find $APACHE_ENABLED -type l); do
-        local site_name=$(basename $site_conf)
-        local site_domain=$(grep -m 1 "ServerName" "$site_conf" | awk '{print $2}')
-        
-        sites_list[$i]="$site_name"
-        
-        if [ "$site_domain" = "$domain" ]; then
-            site_index=$i
+    # Demander l'adresse email pour Let's Encrypt avant tout
+    local email=""
+    while true; do
+        email=$(get_user_input "Entrez votre adresse email pour Let's Encrypt (pour les notifications d'expiration)" "" true)
+        if [ -z "$email" ]; then
+            show_warning "Une adresse email est fortement recommandée pour les notifications d'expiration et de sécurité"
+            if confirm_action "Voulez-vous continuer sans adresse email?"; then
+                email="--register-unsafely-without-email"
+                break
+            fi
+        elif [[ "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+            # Format d'email valide
+            email="--email $email"
+            break
+        else
+            show_error "Format d'adresse email invalide. Veuillez réessayer."
         fi
-        
-        ((i++))
     done
     
-    if [ $site_index -eq 0 ]; then
-        show_error "Impossible de trouver le site $domain dans la liste des sites activés"
-        return 1
+    # Demander si l'utilisateur veut forcer la redirection HTTPS
+    local redirect=""
+    if confirm_action "Voulez-vous forcer la redirection HTTP vers HTTPS?"; then
+        redirect="2" # Option pour forcer la redirection
+    else
+        redirect="1" # Option pour ne pas forcer la redirection
     fi
     
-    # Appeler add_ssl_to_site avec le site déjà identifié
-    # Nous passons l'information par une variable d'environnement temporaire
-    export SSL_SITE_PRESET_CHOICE=$site_index
-    add_ssl_to_site
-    unset SSL_SITE_PRESET_CHOICE
+    # Construction de la commande Certbot directement
+    local certbot_cmd="certbot --apache $email -d $domain -d www.$domain --non-interactive"
     
-    return $?
+    log_info "Obtention du certificat pour $domain..."
+    echo -e "${GREEN}La commande suivante va être exécutée : $certbot_cmd${NC}"
+    
+    # Exécution de la commande certbot avec redirection
+    {
+        sleep 2
+        echo "$redirect"
+    } | $certbot_cmd
+    
+    if [ $? -eq 0 ]; then
+        show_success "Certificat SSL installé avec succès pour $domain"
+        
+        # Configurer le renouvellement automatique si ce n'est pas déjà fait
+        if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
+            if confirm_action "Voulez-vous configurer le renouvellement automatique des certificats?"; then
+                configure_ssl_renewal_cron
+            fi
+        fi
+        return 0
+    else
+        show_error "Échec de l'installation du certificat SSL pour $domain"
+        
+        # Afficher des conseils en cas d'échec
+        echo -e "\n${YELLOW}Conseils en cas d'échec:${NC}"
+        echo "1. Vérifiez que le domaine pointe correctement vers ce serveur"
+        echo "2. Assurez-vous que le port 80 et 443 sont ouverts sur votre pare-feu"
+        echo "3. Let's Encrypt a des limites de taux, attendez une heure si vous avez fait trop de tentatives"
+        echo "4. Vous pouvez essayer avec l'option --staging pour tester sans compter dans les limites"
+        
+        return 1
+    fi
 } 
